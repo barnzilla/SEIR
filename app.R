@@ -1,4 +1,4 @@
-package_names <- c("janitor","readxl","dplyr","deSolve","tidyr","ggplot2", "ggpubr", "tidyverse", "viridis", "shinycssloaders", "DT", "scales", "plotly") 
+package_names <- c("janitor","readxl","dplyr","deSolve","tidyr","ggplot2", "ggpubr", "tidyverse", "shiny", "shinycssloaders", "DT", "scales", "plotly", "matrixcalc") 
 load_packages <- lapply(package_names, require, character.only = TRUE)
 
 # Define UI
@@ -88,6 +88,7 @@ server <- function(input, output) {
       for(k in input_stuff$NAME){
         init_list[[k]] <- as.matrix( subset(input_stuff, NAME == k)[,input_stuff_age_columns] )
       }
+      
       #==========================================================================
       #  Main routine
       #==========================================================================
@@ -137,44 +138,46 @@ server <- function(input, output) {
           
           with(as.list(c(list.inits, list.parms)),{
             
+            N_all <- S + R + L + L_q + L_r + I_a + I_aqn + I_sm + I_ss + I_smisn + I_ssisn + I_ar + I_smr + I_ssr + I_smrisn + I_ssrisn + I_aq #the number of ind. alive
             I_sum <- I_a + I_aqn + I_sm + I_ss + I_smisn + I_ssisn + I_ar + I_smr + I_ssr + I_smrisn + I_ssrisn + phi*I_aq
             I_ssss <- I_ssis + I_ssisn + I_ssh + I_ssrisn
-            BetaCrOneMinusLambda <- BetaC_OneMinusLambda <- BetaCqLambda <- C_OneMinusLambda <- CqLambda <-  CrOneMinusLambda <- CqLambda <- one <- as.matrix(rep(1,nage))
+            c_BetaIprop <- CrBetaIprop <- CqBetaIprop <- C_OneMinusLambda <- one <- as.matrix(rep(1,nage))
             
-            OneMinusLambda       <-    (one - lambda)
-            C_OneMinusLambda     <- c_ %*% OneMinusLambda          
-            CrOneMinusLambda     <- cr %*% OneMinusLambda          
-            CqLambda             <- cq %*% OneMinusLambda          
-            BetaCrOneMinusLambda <- beta %*% CrOneMinusLambda  
-            BetaC_OneMinusLambda <- beta %*% C_OneMinusLambda  
-            BetaCqLambda         <- beta %*% CqLambda          
+            # if (any(N_all==0)){stop("error: the *number of invidividuals in an age class is equal to zero")}else{I_prop <- I_sum * (1/N_all)}
             
-            # rates of change that depends on matrices
+            I_prop <- I_sum # I need to check how beta was computed because it is to low, so it cannot divide by N(a)
+            
+            OneMinusLambda      <- (one - lambda)
+            c_BetaIprop         <- hadamard.prod(c_,beta) %*% I_prop          #I will include the part where the simetry of beta and C's is checked later
+            CqBetaIprop         <- hadamard.prod(cq,beta) %*% I_prop          
+            CrBetaIprop         <- hadamard.prod(cr,beta) %*% I_prop          
+            
+            
+            # rates of change that depends on matrices 
             #--------------------------------------------
-            
-            dS   <- -(BetaC_OneMinusLambda*tau + BetaCqLambda + BetaCrOneMinusLambda*(one - tau))*S*I_sum # updated
-            dL_r <- ((BetaCrOneMinusLambda *(one-tau))*S*I_sum) - (sigma*L_r)                                       
-            dL_q <- (BetaCqLambda*S*I_sum) - (((sigma*(one - rho)) + (sigma*rho))*L_q)                      
-            dL   <- ((BetaC_OneMinusLambda*tau) *S*I_sum) - (sigma*L)                                          
+            dS   <- -((OneMinusLambda * tau * c_BetaIprop) + (lambda * CqBetaIprop) + (OneMinusLambda * (one-tau) * CrBetaIprop)) * S #new formula
+            dL   <- (OneMinusLambda * tau * c_BetaIprop) * S  - sigma * L                                                         #new formula
+            dL_q <- (lambda * CqBetaIprop) * S  - sigma * L_q                                                                     #new formula
+            dL_r <- (OneMinusLambda * (one-tau) * CrBetaIprop) * S  - sigma * L_r                                                 #new formula
             
             # rates of change that depends on vectors
             #--------------------------------------------
-            dI_a      <- sigma*L - I_a*delta*epsilon - I_a*(one -  delta)*upsilon
-            dI_aq     <- sigma*rho*L_q - I_aq*delta*epsilonq - I_aq*(one -  delta)*upsilon # updated
-            dI_ar     <- sigma*L_r - I_ar*delta*epsilon - I_ar*(one -  delta)*upsilon
-            dI_aqn    <- sigma*(one -  rho)*L_q - I_aqn*delta*epsilon - I_aqn*(one -  delta)*upsilon
-            dI_sm     <- (I_a + I_aqn)*delta*epsilon*alpha - kappa*I_sm 
-            dI_ss     <- (I_a + I_aqn)*delta*epsilon*(one - alpha)    - kappa*I_ss # updated
-            dI_smr    <- I_ar*delta*epsilon*alpha - kappa*I_smr
-            dI_ssr    <- I_ar*delta*epsilon*(one - alpha)    - kappa*I_ssr # updated
-            dI_smis   <- kappa*feim*I_sm + kappa*feimr*I_smr + delta*alpha*epsilonq*feimq*I_aq - num*I_smis
-            dI_smisn  <- kappa*(one -  feim)*I_sm - num*I_smisn
-            dI_ssis   <- kappa*feisi*(I_ss + I_ssr) - I_ssis*((one -  mu)*nus + mu*nud)
-            dI_ssisn  <- kappa*((one - feisi-feish)*I_ss)  - I_ssisn*((one -  mu)*nus + mu*nud) 
-            dI_ssh    <- kappa*feish*(I_ss + I_ssr) + delta*(one-alpha)*epsilonq*I_aq - I_ssh*((one - mu)*nus + mu*nud) # updated
-            dI_smrisn <- kappa*(one - feimr)*I_smr - num*I_smrisn
-            dI_ssrisn <- kappa*(one - feisi-feish)*(I_ssr) - I_ssrisn*((one -  mu)*nus + mu*nud)
-            dI_smqisn <- I_aq*delta*alpha*epsilonq*(one - feimq) - num*I_smqisn
+            dI_a      <- sigma * L - I_a * delta * epsilon - I_a * (one -  delta) * upsilon
+            dI_aq     <- sigma * rho * L_q - I_aq * delta * epsilonq - I_aq * (one -  delta) * upsilon # updated 
+            dI_ar     <- sigma * L_r - I_ar * delta * epsilon - I_ar * (one -  delta) * upsilon
+            dI_aqn    <- sigma * (one -  rho) * L_q - I_aqn * delta * epsilon - I_aqn * (one -  delta) * upsilon
+            dI_sm     <- (I_a + I_aqn) * delta * epsilon * alpha - kappa * I_sm 
+            dI_ss     <- (I_a + I_aqn) * delta * epsilon * (one - alpha)    - kappa * I_ss # updated 
+            dI_smr    <- I_ar * delta * epsilon * alpha - kappa * I_smr
+            dI_ssr    <- I_ar * delta * epsilon * (one - alpha)    - kappa * I_ssr # updated 
+            dI_smis   <- kappa * feim * I_sm + kappa * feimr * I_smr + delta * alpha * epsilonq * feimq * I_aq - num * I_smis
+            dI_smisn  <- kappa * (one -  feim) * I_sm - num * I_smisn
+            dI_ssis   <- kappa * feisi * (I_ss + I_ssr) - I_ssis * ((one -  mu) * nus + mu * nud)
+            dI_ssisn  <- kappa * ((one - feisi-feish) * I_ss)  - I_ssisn * ((one -  mu) * nus + mu * nud) 
+            dI_ssh    <- kappa * feish * (I_ss + I_ssr) + delta * (one-alpha) * epsilonq * I_aq - I_ssh * ((one - mu) * nus + mu * nud) # updated 
+            dI_smrisn <- kappa * (one - feimr) * I_smr - num * I_smrisn
+            dI_ssrisn <- kappa * (one - feisi-feish) * (I_ssr) - I_ssrisn * ((one -  mu) * nus + mu * nud)
+            dI_smqisn <- I_aq * delta * alpha * epsilonq * (one - feimq) - num * I_smqisn
             dR        <- (I_a + I_aq + I_aqn + I_ar)*(one - delta)*upsilon + num*(I_smis + I_smisn + I_smqisn + I_smrisn) + (one - mu)*nus*I_ssss
             dD        <- mu*nud*I_ssss
             
@@ -215,6 +218,7 @@ server <- function(input, output) {
       nSim <- max(time_stuff$isim)
       listOut <- list()
       previous.tmax <- 0
+      out<-NULL
       
       for(i in seq(1, nSim, 1)){
         parameter.by.age     <- subset(time_stuff  , isim == i)
@@ -259,6 +263,7 @@ server <- function(input, output) {
         listOut[[i]] <- out
       }
       
+      
       # Merge the data
       big_out <- bind_rows(listOut, .id = "column_label") %>% distinct(time, .keep_all= TRUE)
       xx <- yy <- df <- df2 <- NULL
@@ -277,11 +282,8 @@ server <- function(input, output) {
         names(big_out)[c(dim(big_out)[2]-1,dim(big_out)[2])]<-c(paste0(c("L_tot","I_tot"),p))
         varsc<-names(big_out)[grepl(p,names(big_out))]
       }
-      
-      big_out <- big_out[,-1]
-      names(big_out)[1] <- "_Time"
-      big_out <- big_out[,order(names(big_out))]
-      names(big_out)[1] <- "Time"
+      big_out <- big_out %>% select(order(colnames(big_out))) %>% select(time, everything())
+      colnames(big_out)[1] <- "Time"
       return(list(big_out = big_out, nagegrp = nagegrp))
     }
   })
