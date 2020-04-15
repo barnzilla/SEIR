@@ -1,15 +1,19 @@
+# Load packages to extend base R
 package_names <- c("janitor","readxl","dplyr","deSolve","tidyr","ggplot2", "ggpubr", "tidyverse", "shiny", "shinycssloaders", "DT", "scales", "plotly", "matrixcalc") 
 load_packages <- lapply(package_names, require, character.only = TRUE)
 
 # Define UI
 ui <- fluidPage(
-  # Application title
+  # Add CSS here
   tags$head(
     tags$style(HTML("
       // CSS goes here
     "))
   ),
+  # Application title
   titlePanel("COVID-19 model app"),
+  
+  # Layout
   sidebarLayout(
     sidebarPanel(
       fileInput("file", "Upload model parameters (Excel file)"),
@@ -21,8 +25,11 @@ ui <- fluidPage(
     mainPanel(
       tabsetPanel(
         tabPanel("Plot", br(), plotlyOutput("plot") %>% withSpinner(color = "#337ab7")),
-        tabPanel("Key statistics", br(), DTOutput("stats") %>% withSpinner(color = "#337ab7")),
-        tabPanel("Model output", br(), DTOutput("table") %>% withSpinner(color = "#337ab7"))
+        tabPanel("Summary statistics", br(), DTOutput("summary_statistics") %>% withSpinner(color = "#337ab7")),
+        tabPanel("Model output", br(), DTOutput("model_output") %>% withSpinner(color = "#337ab7")),
+        tabPanel("Model input (time)", br(), DTOutput("model_inputs_time1") %>% withSpinner(color = "#337ab7")),
+        tabPanel("Model input (time2)", br(), DTOutput("model_inputs_time2") %>% withSpinner(color = "#337ab7")),
+        tabPanel("Model input (inputs)", br(), DTOutput("model_inputs") %>% withSpinner(color = "#337ab7"))
       ),
       width = 9
     )
@@ -31,6 +38,8 @@ ui <- fluidPage(
 
 # Define server logic 
 server <- function(input, output) {
+  
+  # Build age group menu based on the number of age groups detected in the uploaded Excel file
   output$age_group <- renderUI({
     if(is.null(run_model()$nagegrp)) { 
       return() 
@@ -41,6 +50,7 @@ server <- function(input, output) {
     }
   })
   
+  # Build compartment menu
   output$compartment <- renderUI({
     if(is.null(run_model()$nagegrp)) { 
       return() 
@@ -49,6 +59,7 @@ server <- function(input, output) {
     }
   })
   
+  # Build start date field
   output$start_date <- renderUI({
     if(is.null(run_model()$nagegrp)) { 
       return() 
@@ -57,6 +68,70 @@ server <- function(input, output) {
     }
   })
   
+  # Read sheets from uploaded Excel file
+  get_inputs <- reactive({
+    file_to_read <- input$file
+    if(is.null(file_to_read)) {
+      return(list(time1 = data.frame(), time2 = data.frame(), inputs = data.frame(), columns = NULL))
+    } else {
+      time_stuff   <- as.data.frame.from.tbl( readxl::read_excel(file_to_read$datapath, sheet = "time") )  # other parameters
+      time_stuff_m <- as.data.frame.from.tbl( readxl::read_excel(file_to_read$datapath, sheet = "time2") ) # c_, cr, cq, and beta
+      input_stuff  <- as.data.frame.from.tbl( readxl::read_excel(file_to_read$datapath, sheet = "input") ) # initial values
+      return(list(time1 = time_stuff, time2 = time_stuff_m, inputs = input_stuff))
+    }
+  })
+  
+  # Compute summary statistics based on the age group and compartment(s) selected with Time converted to YYYY-mm-dd if the start date field is populated
+  get_statistics <- reactive({
+    if(nrow(run_model()$big_out) < 1) {
+      return()
+    } else {
+      # Function to compute min counts 
+      get_min_count <- function(df, variable_of_interest) {
+        df <- df %>% filter(Time < 365.25) %>% filter(!!rlang::sym(variable_of_interest) == min(!!rlang::sym(variable_of_interest))) %>% select(Time, variable_of_interest)
+        start_date <- paste0("|", input$start_date, collapse = "")
+        if(nchar(gsub("[|]", "", start_date)) == 10) {
+          start_date <- as.Date(gsub("[|]", "", start_date), format = "%Y-%m-%d")
+          df$Time <- as.character(start_date + df$Time)
+        }
+        df <- tibble(Compartment = names(df)[2], Min = as.integer(df[,2]), Day = df$Time)
+      }
+      
+      # Function to compute max counts
+      get_max_count <- function(df, variable_of_interest) {
+        df <- df %>% filter(Time < 365.25) %>% filter(!!rlang::sym(variable_of_interest) == max(!!rlang::sym(variable_of_interest))) %>% select(Time, variable_of_interest)
+        start_date <- paste0("|", input$start_date, collapse = "")
+        if(nchar(gsub("[|]", "", start_date)) == 10) {
+          start_date <- as.Date(gsub("[|]", "", start_date), format = "%Y-%m-%d")
+          df$Time <- as.character(start_date + df$Time)
+        }
+        df <- tibble(Compartment = names(df)[2], Max = as.integer(df[,2]), Day = df$Time)
+      }
+      
+      # Data frame with min stats
+      df1 <- as.data.frame(t(sapply(paste0(input$compartment, input$age_group), function(x) get_min_count(run_model()$big_out, x))))
+      for(i in 1:ncol(df1)) {
+        df1[,i] <- unname(unlist(df1[,i]))
+      }
+      
+      # Data frame with max stats
+      df2 <- as.data.frame(t(sapply(paste0(input$compartment, input$age_group), function(x) get_max_count(run_model()$big_out, x))))
+      for(i in 1:ncol(df2)) {
+        df2[,i] <- unname(unlist(df2[,i]))
+      }
+      
+      # Merge min and max data frames
+      df <- cbind(df1, df2 %>% select(-Compartment))
+      
+      # Convert variable names to long form
+      lookup <- tibble(short = c("S", "L_tot", "I_tot", "R", "D"), long = c("Susceptible", "Latent", "Infected", "Recovered", "Dead"))
+      df$Compartment <- lookup$long[match(gsub('[0-9]+', '', df$Compartment), lookup$short)]
+      
+      return(list(df = df))
+    }
+  })
+  
+  # Run SEIR model by age groups
   run_model <- reactive({
     # generate bins based on input$bins from ui.R
     file_to_read <- input$file
@@ -64,9 +139,9 @@ server <- function(input, output) {
       return(list(big_out = data.frame(), nagegrp = NULL, columns = NULL))
     } else {
       source("UtilitiesChunks.R") 
-      time_stuff   <- as.data.frame.from.tbl( readxl::read_excel(file_to_read$datapath, sheet = "time") )  # other parameters
-      time_stuff_m <- as.data.frame.from.tbl( readxl::read_excel(file_to_read$datapath, sheet = "time2") ) # c_, cr, cq, and beta
-      input_stuff  <- as.data.frame.from.tbl( readxl::read_excel(file_to_read$datapath, sheet = "input") ) # initial values
+      time_stuff   <- get_inputs()$time1
+      time_stuff_m <- get_inputs()$time2
+      input_stuff  <- get_inputs()$inputs
       
       nagegrp <- length(unique(time_stuff$agegrp))        # number of age groups
       
@@ -288,6 +363,7 @@ server <- function(input, output) {
     }
   })
   
+  # Build line plot based on the age group and compartment(s) selected with Time converted to YYYY-mm-dd if the start date field is populated
   output$plot <- renderPlotly({
     # generate bins based on input$bins from ui.R
     if(nrow(run_model()$big_out) < 1 | is.null(input$age_group) | is.null(input$compartment)) {
@@ -309,11 +385,6 @@ server <- function(input, output) {
       big_out_graphs <- big_out %>%
         select(c("Time", variables_of_interest)) %>%
         filter(Time < timelimit) # I set a limit of days for the graphics
-      
-      
-      # Add lookup table for age groups (if nagegrp!=5 or nagegrp=1, please write here the labels)
-      #if (nagegrp==1){lookup0 <- c("all age groups")}
-      #if (nagegrp==5){lookup0 <- c("< 20 year-olds", "20- to 59-year-olds", "60- to 69-year-olds", "70-79-year-olds", "80+ year-olds")}
       
       # if needs nagegrp and lookup0
       get_plot <- function(data, age_group) {
@@ -363,26 +434,100 @@ server <- function(input, output) {
       
       # Reshape SEIR model output from wide to long format
       big_out_long <- gather(big_out_graphs, key = meta_key, value = meta_value, 2:ncol(big_out_graphs), factor_key = TRUE)
-      # Create a time series plot for each age group and add it to a list object
-      #plots <- lapply(1:nagegrp, FUN = get_plot, data = big_out_long)
       
       # Output the plots in a panel
-      #print(ggarrange(plotlist = ggplotly(plots), ncol = 2, nrow = ceiling(length(plots)/ 2), common.legend = TRUE))
       get_plot(big_out_long, input$age_group)
     }
   })
   
-  output$stats <- renderDT({
-    return()
-  })
+  # Render the summary statistics in searchable/sortable table
+  output$summary_statistics <- renderDT(
+    get_statistics()$df,
+    extensions = c("Buttons", "Scroller"), 
+    rownames = FALSE,
+    options = list(
+      columnDefs = list(list(visible = FALSE, targets = c())),
+      pageLength = 10, 
+      dom = "Bfrtip", 
+      buttons = c("colvis", "copy", "csv", "excel", "pdf"), 
+      deferRender = TRUE, 
+      searchDelay = 500,
+      initComplete = JS(
+        "function(settings, json) {",
+        "$(this.api().table().header()).css({'background-color': '#fff', 'color': '#111'});",
+        "}"
+      )
+    )
+  )
   
-  output$table = renderDT(
+  # Render uploaded Excel file (the "time" sheet) in searchable/sortable table
+  output$model_inputs_time1 <- renderDT(
+    get_inputs()$time1,
+    extensions = c("Buttons", "Scroller"), 
+    rownames = FALSE,
+    options = list(
+      columnDefs = list(list(visible = FALSE, targets = c())),
+      pageLength = 10, 
+      dom = "Bfrtip", 
+      buttons = c("colvis", "copy", "csv", "excel", "pdf"), 
+      deferRender = TRUE, 
+      searchDelay = 500,
+      initComplete = JS(
+        "function(settings, json) {",
+        "$(this.api().table().header()).css({'background-color': '#fff', 'color': '#111'});",
+        "}"
+      )
+    )
+  )
+  
+  # Render uploaded Excel file (the "time2" sheet) in searchable/sortable table
+  output$model_inputs_time2 <- renderDT(
+    get_inputs()$time2,
+    extensions = c("Buttons", "Scroller"), 
+    rownames = FALSE,
+    options = list(
+      columnDefs = list(list(visible = FALSE, targets = c())),
+      pageLength = 10, 
+      dom = "Bfrtip", 
+      buttons = c("colvis", "copy", "csv", "excel", "pdf"), 
+      deferRender = TRUE, 
+      searchDelay = 500,
+      initComplete = JS(
+        "function(settings, json) {",
+        "$(this.api().table().header()).css({'background-color': '#fff', 'color': '#111'});",
+        "}"
+      )
+    )
+  )
+  
+  # Render uploaded Excel file (the "inputs" sheet) in searchable/sortable table
+  output$model_inputs <- renderDT(
+    get_inputs()$inputs,
+    extensions = c("Buttons", "Scroller"), 
+    rownames = FALSE,
+    options = list(
+      columnDefs = list(list(visible = FALSE, targets = c())),
+      pageLength = 10, 
+      dom = "Bfrtip", 
+      buttons = c("colvis", "copy", "csv", "excel", "pdf"), 
+      deferRender = TRUE, 
+      searchDelay = 500,
+      initComplete = JS(
+        "function(settings, json) {",
+        "$(this.api().table().header()).css({'background-color': '#fff', 'color': '#111'});",
+        "}"
+      )
+    )
+  )
+  
+  # Render the SEIR model output in searchable/sortable table
+  output$model_output = renderDT(
     run_model()$big_out[,grepl(paste0("Time|", input$age_group, collapse = ""), names(run_model()$big_out))] %>% round(),
     extensions = c("Buttons", "Scroller"), 
     rownames = FALSE,
     options = list(
       columnDefs = list(list(visible = FALSE, targets = c())),
-      pageLength = 100, 
+      pageLength = 10, 
       dom = "Bfrtip", 
       buttons = c("colvis", "copy", "csv", "excel", "pdf"), 
       deferRender = TRUE, 
