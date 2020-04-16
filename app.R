@@ -38,36 +38,6 @@ ui <- fluidPage(
 
 # Define server logic 
 server <- function(input, output) {
-  
-  # Build age group menu based on the number of age groups detected in the uploaded Excel file
-  output$age_group <- renderUI({
-    if(is.null(run_model()$nagegrp)) { 
-      return() 
-    } else {
-      age_groups <- 1:run_model()$nagegrp
-      names(age_groups) <- paste0("Age group ", age_groups)
-      selectInput("age_group", "Select age group", choices = age_groups)
-    }
-  })
-  
-  # Build compartment menu
-  output$compartment <- renderUI({
-    if(is.null(run_model()$nagegrp)) { 
-      return() 
-    } else {
-      checkboxGroupInput("compartment", label = "Select compartments", choices = list("Susceptible" = "S", "Latent" = "L_tot", "Infected" = "I_tot", "Recovered" = "R", "Dead" = "D"), selected = c("S", "L_tot", "I_tot", "R", "D"))
-    }
-  })
-  
-  # Build start date field
-  output$start_date <- renderUI({
-    if(is.null(run_model()$nagegrp)) { 
-      return() 
-    } else {
-      dateInput("start_date", "Select start date (for Time = 0)", value="")
-    }
-  })
-  
   # Read sheets from uploaded Excel file
   get_inputs <- reactive({
     file_to_read <- input$file
@@ -81,30 +51,39 @@ server <- function(input, output) {
     }
   })
   
+  # Function to process user input from the start date field
+  get_start_date <- function() {
+    start_date <- paste0("|", input$start_date, collapse = "")
+    if(nchar(gsub("[|]", "", start_date)) == 10) {
+      start_date <- as.Date(gsub("[|]", "", start_date), format = "%Y-%m-%d")
+    } else {
+      start_date <- NA
+    }
+    return(start_date)
+  }
+  
   # Compute summary statistics based on the age group and compartment(s) selected with Time converted to YYYY-mm-dd if the start date field is populated
   get_statistics <- reactive({
-    if(nrow(run_model()$big_out) < 1) {
+    if(nrow(run_model()$big_out) < 1 | is.null(input$compartment)) {
       return()
     } else {
       # Function to compute min counts 
       get_min_count <- function(df, variable_of_interest) {
-        df <- df %>% filter(Time < 365.25) %>% filter(!!rlang::sym(variable_of_interest) == min(!!rlang::sym(variable_of_interest))) %>% select(Time, variable_of_interest)
-        start_date <- paste0("|", input$start_date, collapse = "")
-        if(nchar(gsub("[|]", "", start_date)) == 10) {
-          start_date <- as.Date(gsub("[|]", "", start_date), format = "%Y-%m-%d")
+        df <- df %>% filter(Time < 365.25) %>% filter(!!rlang::sym(variable_of_interest) == min(!!rlang::sym(variable_of_interest))) %>% select(c(Time, all_of(variable_of_interest)))
+        start_date <- get_start_date()
+        if(! is.na(start_date)) {
           df$Time <- as.character(start_date + df$Time)
-        }
+        } 
         df <- tibble(Compartment = names(df)[2], Min = as.integer(df[,2]), Day = df$Time)
       }
       
       # Function to compute max counts
       get_max_count <- function(df, variable_of_interest) {
-        df <- df %>% filter(Time < 365.25) %>% filter(!!rlang::sym(variable_of_interest) == max(!!rlang::sym(variable_of_interest))) %>% select(Time, variable_of_interest)
-        start_date <- paste0("|", input$start_date, collapse = "")
-        if(nchar(gsub("[|]", "", start_date)) == 10) {
-          start_date <- as.Date(gsub("[|]", "", start_date), format = "%Y-%m-%d")
+        df <- df %>% filter(Time < 365.25) %>% filter(!!rlang::sym(variable_of_interest) == max(!!rlang::sym(variable_of_interest))) %>% select(c(Time, all_of(variable_of_interest)))
+        start_date <- get_start_date()
+        if(! is.na(start_date)) {
           df$Time <- as.character(start_date + df$Time)
-        }
+        } 
         df <- tibble(Compartment = names(df)[2], Max = as.integer(df[,2]), Day = df$Time)
       }
       
@@ -130,6 +109,211 @@ server <- function(input, output) {
       return(list(df = df))
     }
   })
+  
+  # Build age group menu based on the number of age groups detected in the uploaded Excel file
+  output$age_group <- renderUI({
+    if(is.null(run_model()$nagegrp)) { 
+      return() 
+    } else {
+      age_groups <- 1:run_model()$nagegrp
+      names(age_groups) <- paste0("Age group ", age_groups)
+      selectInput("age_group", "Select age group", choices = age_groups)
+    }
+  })
+  
+  # Build compartment menu
+  output$compartment <- renderUI({
+    if(is.null(run_model()$nagegrp)) { 
+      return() 
+    } else {
+      checkboxGroupInput("compartment", label = "Select compartments", choices = list("Susceptible" = "S", "Latent" = "L_tot", "Infected" = "I_tot", "Recovered" = "R", "Dead" = "D"), selected = c("S", "L_tot", "I_tot", "R", "D"))
+    }
+  })
+  
+  # Render uploaded Excel file (the "inputs" sheet) in searchable/sortable table
+  output$model_inputs <- renderDT(
+    get_inputs()$inputs,
+    extensions = c("Buttons", "Scroller"), 
+    rownames = FALSE,
+    options = list(
+      columnDefs = list(list(visible = FALSE, targets = c())),
+      pageLength = 10, 
+      dom = "Bfrtip", 
+      buttons = c("colvis", "copy", "csv", "excel", "pdf"), 
+      deferRender = TRUE, 
+      searchDelay = 500,
+      initComplete = JS(
+        "function(settings, json) {",
+        "$(this.api().table().header()).css({'background-color': '#fff', 'color': '#111'});",
+        "}"
+      )
+    )
+  )
+  
+  # Render uploaded Excel file (the "time" sheet) in searchable/sortable table
+  output$model_inputs_time1 <- renderDT(
+    get_inputs()$time1,
+    extensions = c("Buttons", "Scroller"), 
+    rownames = FALSE,
+    options = list(
+      columnDefs = list(list(visible = FALSE, targets = c())),
+      pageLength = 10, 
+      dom = "Bfrtip", 
+      buttons = c("colvis", "copy", "csv", "excel", "pdf"), 
+      deferRender = TRUE, 
+      searchDelay = 500,
+      initComplete = JS(
+        "function(settings, json) {",
+        "$(this.api().table().header()).css({'background-color': '#fff', 'color': '#111'});",
+        "}"
+      )
+    )
+  )
+  
+  # Render uploaded Excel file (the "time2" sheet) in searchable/sortable table
+  output$model_inputs_time2 <- renderDT(
+    get_inputs()$time2,
+    extensions = c("Buttons", "Scroller"), 
+    rownames = FALSE,
+    options = list(
+      columnDefs = list(list(visible = FALSE, targets = c())),
+      pageLength = 10, 
+      dom = "Bfrtip", 
+      buttons = c("colvis", "copy", "csv", "excel", "pdf"), 
+      deferRender = TRUE, 
+      searchDelay = 500,
+      initComplete = JS(
+        "function(settings, json) {",
+        "$(this.api().table().header()).css({'background-color': '#fff', 'color': '#111'});",
+        "}"
+      )
+    )
+  )
+  
+  # Render the SEIR model output in searchable/sortable table
+  output$model_output = renderDT(
+    run_model()$big_out[,grepl(paste0("Time|", input$age_group, collapse = ""), names(run_model()$big_out))] %>% round(),
+    extensions = c("Buttons", "Scroller"), 
+    rownames = FALSE,
+    options = list(
+      columnDefs = list(list(visible = FALSE, targets = c())),
+      pageLength = 10, 
+      dom = "Bfrtip", 
+      buttons = c("colvis", "copy", "csv", "excel", "pdf"), 
+      deferRender = TRUE, 
+      searchDelay = 500,
+      initComplete = JS(
+        "function(settings, json) {",
+        "$(this.api().table().header()).css({'background-color': '#fff', 'color': '#111'});",
+        "}"
+      )
+    )
+  )
+  
+  # Build line plot based on the age group and compartment(s) selected with Time converted to YYYY-mm-dd if the start date field is populated
+  output$plot <- renderPlotly({
+    # generate bins based on input$bins from ui.R
+    if(nrow(run_model()$big_out) < 1 | is.null(input$age_group) | is.null(input$compartment)) {
+      return()
+    } else {
+      big_out <- run_model()$big_out
+      nagegrp <- run_model()$nagegrp
+      if (nagegrp > 1){
+        #variables_of_interest <- as.vector(sapply(c("S","L_tot","I_tot","R","D"), function(x) paste0(x, input$age_group)))
+        variables_of_interest <- as.vector(sapply(input$compartment, function(x) paste0(x, input$age_group)))
+        timelimit <- 365.25
+      } else {
+        #variables_of_interest <- c("S","L_tot1","I_tot1","R","D")
+        variables_of_interest <- input$compartment
+        variables_of_interest <- gsub("L_tot", "L_tot1", variables_of_interest)
+        variables_of_interest <- gsub("I_tot", "I_tot1", variables_of_interest)
+        timelimit <- 1500
+      }
+      big_out_graphs <- big_out %>%
+        select(c(Time, all_of(variables_of_interest))) %>%
+        filter(Time < timelimit) # I set a limit of days for the graphics
+      
+      # if needs nagegrp and lookup0
+      get_plot <- function(data, age_group) {
+        # Subset the data frame to include only the vectors of interest
+        if (nagegrp > 1) {
+          data_subset <- filter(data, meta_key %in% paste0(c("S","L_tot","I_tot","R","D"), age_group))
+        } else {
+          data_subset <- filter(data, meta_key %in% c("S","L_tot1","I_tot1","R","D"))
+        }
+        
+        # Refactor the meta_key vector so that levels no longer represented in the vector are removed
+        data_subset$meta_key <- factor(data_subset$meta_key)
+        
+        # Add labels to the factor, which will also appear in the legend
+        lookup <- tibble(short = c("S", "L_tot", "I_tot", "R", "D"), long = c("Susceptible", "Latent", "Infected", "Recovered", "Dead"))
+        data_subset$meta_key <- factor(data_subset$meta_key, levels = levels(data_subset$meta_key), labels = lookup$long[match(gsub('[0-9]+', '', variables_of_interest), lookup$short)])
+        
+        names(data_subset) <- c("Day", "Compartment", "Individuals")
+        data_subset$Individuals <- as.integer(data_subset$Individuals)
+        
+        start_date <- get_start_date()
+        if(! is.na(start_date)) {
+          data_subset$Day <- start_date + data_subset$Day
+          x_lab_label <- paste0("Time (since ", format(start_date, format = "%B %d, %Y"), ")")
+        } else {
+          x_lab_label = "Time (days)"
+        }
+        
+        # Output the plot
+        p <- ggplot(data_subset, aes(x = Day, y = Individuals)) +
+          geom_line(aes(color = Compartment), size = 0.85) +
+          ggtitle(paste0("SEIR model, age group ", age_group)) +
+          xlab(x_lab_label) +
+          ylab("Count (individuals)") +
+          scale_y_continuous(labels = comma) +
+          theme_minimal() +
+          theme(
+            plot.title = element_text(size = 12),
+            axis.title.x = element_text(size = 12),
+            axis.title.y = element_text(size = 12),
+            legend.text = element_text(size = 12),
+            legend.title = element_blank()
+          )
+        p <- ggplotly(p)
+      }
+      
+      # Reshape SEIR model output from wide to long format
+      big_out_long <- gather(big_out_graphs, key = meta_key, value = meta_value, 2:ncol(big_out_graphs), factor_key = TRUE)
+      
+      # Output the plots in a panel
+      get_plot(big_out_long, input$age_group)
+    }
+  })
+  
+  # Build start date field
+  output$start_date <- renderUI({
+    if(is.null(run_model()$nagegrp)) { 
+      return() 
+    } else {
+      dateInput("start_date", "Select start date (for Time = 0)", value = "", format = "yyyy-mm-dd")
+    }
+  })
+  
+  # Render the summary statistics in searchable/sortable table
+  output$summary_statistics <- renderDT(
+    get_statistics()$df,
+    extensions = c("Buttons", "Scroller"), 
+    rownames = FALSE,
+    options = list(
+      columnDefs = list(list(visible = FALSE, targets = c())),
+      pageLength = 10, 
+      dom = "Bfrtip", 
+      buttons = c("colvis", "copy", "csv", "excel", "pdf"), 
+      deferRender = TRUE, 
+      searchDelay = 500,
+      initComplete = JS(
+        "function(settings, json) {",
+        "$(this.api().table().header()).css({'background-color': '#fff', 'color': '#111'});",
+        "}"
+      )
+    )
+  )
   
   # Run SEIR model by age groups
   run_model <- reactive({
@@ -357,188 +541,20 @@ server <- function(input, output) {
         names(big_out)[c(dim(big_out)[2]-1,dim(big_out)[2])]<-c(paste0(c("L_tot","I_tot"),p))
         varsc<-names(big_out)[grepl(p,names(big_out))]
       }
+      
+      # Compute incidence
+      #big_out$IncI <- NA
+      #big_out$IncI[1] <- big_out$I_tot[1]
+      #for(i in 2:nrow(big_out)) big_out$IncI[i] <- big_out$L_tot[i - 1] * (get_inputs()$time1 %>% filter(agegrp == input$age_group) %>% select(sigma)[1])
+      
+      # Organize model output vectors alphabetically
       big_out <- big_out %>% select(order(colnames(big_out))) %>% select(time, everything())
+      
+      # Rename the time vector
       colnames(big_out)[1] <- "Time"
       return(list(big_out = big_out, nagegrp = nagegrp))
     }
   })
-  
-  # Build line plot based on the age group and compartment(s) selected with Time converted to YYYY-mm-dd if the start date field is populated
-  output$plot <- renderPlotly({
-    # generate bins based on input$bins from ui.R
-    if(nrow(run_model()$big_out) < 1 | is.null(input$age_group) | is.null(input$compartment)) {
-      return()
-    } else {
-      big_out <- run_model()$big_out
-      nagegrp <- run_model()$nagegrp
-      if (nagegrp > 1){
-        #variables_of_interest <- as.vector(sapply(c("S","L_tot","I_tot","R","D"), function(x) paste0(x, input$age_group)))
-        variables_of_interest <- as.vector(sapply(input$compartment, function(x) paste0(x, input$age_group)))
-        timelimit <- 365.25
-      } else {
-        #variables_of_interest <- c("S","L_tot1","I_tot1","R","D")
-        variables_of_interest <- input$compartment
-        variables_of_interest <- gsub("L_tot", "L_tot1", variables_of_interest)
-        variables_of_interest <- gsub("I_tot", "I_tot1", variables_of_interest)
-        timelimit <- 1500
-      }
-      big_out_graphs <- big_out %>%
-        select(c("Time", variables_of_interest)) %>%
-        filter(Time < timelimit) # I set a limit of days for the graphics
-      
-      # if needs nagegrp and lookup0
-      get_plot <- function(data, age_group) {
-        # Subset the data frame to include only the vectors of interest
-        if (nagegrp > 1) {
-          data_subset <- filter(data, meta_key %in% paste0(c("S","L_tot","I_tot","R","D"), age_group))
-        } else {
-          data_subset <- filter(data, meta_key %in% c("S","L_tot1","I_tot1","R","D"))
-        }
-        
-        # Refactor the meta_key vector so that levels no longer represented in the vector are removed
-        data_subset$meta_key <- factor(data_subset$meta_key)
-        
-        # Add labels to the factor, which will also appear in the legend
-        lookup <- tibble(short = c("S", "L_tot", "I_tot", "R", "D"), long = c("Susceptible", "Latent", "Infected", "Recovered", "Dead"))
-        data_subset$meta_key <- factor(data_subset$meta_key, levels = levels(data_subset$meta_key), labels = lookup$long[match(gsub('[0-9]+', '', variables_of_interest), lookup$short)])
-        
-        names(data_subset) <- c("Day", "Compartment", "Individuals")
-        data_subset$Individuals <- as.integer(data_subset$Individuals)
-        
-        start_date <- paste0("|", input$start_date, collapse = "")
-        if(nchar(gsub("[|]", "", start_date)) == 10) {
-          start_date <- as.Date(gsub("[|]", "", start_date), format = "%Y-%m-%d")
-          data_subset$Day <- start_date + data_subset$Day
-          x_lab_label <- paste0("Time (since ", format(start_date, format = "%B %d, %Y"), ")")
-        } else {
-          x_lab_label = "Time (days)"
-        }
-        
-        # Output the plot
-        p <- ggplot(data_subset, aes(x = Day, y = Individuals)) +
-          geom_line(aes(color = Compartment), size = 0.85) +
-          ggtitle(paste0("SEIR model, age group ", age_group)) +
-          xlab(x_lab_label) +
-          ylab("Count (individuals)") +
-          scale_y_continuous(labels = comma) +
-          theme_minimal() +
-          theme(
-            plot.title = element_text(size = 12),
-            axis.title.x = element_text(size = 12),
-            axis.title.y = element_text(size = 12),
-            legend.text = element_text(size = 12),
-            legend.title = element_blank()
-          )
-        p <- ggplotly(p)
-      }
-      
-      # Reshape SEIR model output from wide to long format
-      big_out_long <- gather(big_out_graphs, key = meta_key, value = meta_value, 2:ncol(big_out_graphs), factor_key = TRUE)
-      
-      # Output the plots in a panel
-      get_plot(big_out_long, input$age_group)
-    }
-  })
-  
-  # Render the summary statistics in searchable/sortable table
-  output$summary_statistics <- renderDT(
-    get_statistics()$df,
-    extensions = c("Buttons", "Scroller"), 
-    rownames = FALSE,
-    options = list(
-      columnDefs = list(list(visible = FALSE, targets = c())),
-      pageLength = 10, 
-      dom = "Bfrtip", 
-      buttons = c("colvis", "copy", "csv", "excel", "pdf"), 
-      deferRender = TRUE, 
-      searchDelay = 500,
-      initComplete = JS(
-        "function(settings, json) {",
-        "$(this.api().table().header()).css({'background-color': '#fff', 'color': '#111'});",
-        "}"
-      )
-    )
-  )
-  
-  # Render uploaded Excel file (the "time" sheet) in searchable/sortable table
-  output$model_inputs_time1 <- renderDT(
-    get_inputs()$time1,
-    extensions = c("Buttons", "Scroller"), 
-    rownames = FALSE,
-    options = list(
-      columnDefs = list(list(visible = FALSE, targets = c())),
-      pageLength = 10, 
-      dom = "Bfrtip", 
-      buttons = c("colvis", "copy", "csv", "excel", "pdf"), 
-      deferRender = TRUE, 
-      searchDelay = 500,
-      initComplete = JS(
-        "function(settings, json) {",
-        "$(this.api().table().header()).css({'background-color': '#fff', 'color': '#111'});",
-        "}"
-      )
-    )
-  )
-  
-  # Render uploaded Excel file (the "time2" sheet) in searchable/sortable table
-  output$model_inputs_time2 <- renderDT(
-    get_inputs()$time2,
-    extensions = c("Buttons", "Scroller"), 
-    rownames = FALSE,
-    options = list(
-      columnDefs = list(list(visible = FALSE, targets = c())),
-      pageLength = 10, 
-      dom = "Bfrtip", 
-      buttons = c("colvis", "copy", "csv", "excel", "pdf"), 
-      deferRender = TRUE, 
-      searchDelay = 500,
-      initComplete = JS(
-        "function(settings, json) {",
-        "$(this.api().table().header()).css({'background-color': '#fff', 'color': '#111'});",
-        "}"
-      )
-    )
-  )
-  
-  # Render uploaded Excel file (the "inputs" sheet) in searchable/sortable table
-  output$model_inputs <- renderDT(
-    get_inputs()$inputs,
-    extensions = c("Buttons", "Scroller"), 
-    rownames = FALSE,
-    options = list(
-      columnDefs = list(list(visible = FALSE, targets = c())),
-      pageLength = 10, 
-      dom = "Bfrtip", 
-      buttons = c("colvis", "copy", "csv", "excel", "pdf"), 
-      deferRender = TRUE, 
-      searchDelay = 500,
-      initComplete = JS(
-        "function(settings, json) {",
-        "$(this.api().table().header()).css({'background-color': '#fff', 'color': '#111'});",
-        "}"
-      )
-    )
-  )
-  
-  # Render the SEIR model output in searchable/sortable table
-  output$model_output = renderDT(
-    run_model()$big_out[,grepl(paste0("Time|", input$age_group, collapse = ""), names(run_model()$big_out))] %>% round(),
-    extensions = c("Buttons", "Scroller"), 
-    rownames = FALSE,
-    options = list(
-      columnDefs = list(list(visible = FALSE, targets = c())),
-      pageLength = 10, 
-      dom = "Bfrtip", 
-      buttons = c("colvis", "copy", "csv", "excel", "pdf"), 
-      deferRender = TRUE, 
-      searchDelay = 500,
-      initComplete = JS(
-        "function(settings, json) {",
-        "$(this.api().table().header()).css({'background-color': '#fff', 'color': '#111'});",
-        "}"
-      )
-    )
-  )
 }
 
 # Run the application 
