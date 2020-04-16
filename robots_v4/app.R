@@ -24,12 +24,14 @@ ui <- fluidPage(
       fileInput("file", "Upload model parameters (Excel file)"),
       uiOutput("age_group"),
       uiOutput("compartment"),
+      uiOutput("rate"),
       uiOutput("start_date"),
+      uiOutput("max_time"),
       width = 3
     ),
     mainPanel(
       tabsetPanel(
-        tabPanel("Compartment plot", br(), plotlyOutput("compartment_plot") %>% withSpinner(color = "#337ab7")),
+        tabPanel("Plot", br(), plotlyOutput("compartment_plot") %>% withSpinner(color = "#337ab7")),
         tabPanel("Summary statistics", br(), DTOutput("summary_statistics") %>% withSpinner(color = "#337ab7")),
         tabPanel("Model output", br(), DTOutput("model_output") %>% withSpinner(color = "#337ab7")),
         tabPanel("Initial conditions", br(), DTOutput("initial_conditions") %>% withSpinner(color = "#337ab7")),
@@ -69,12 +71,12 @@ server <- function(input, output) {
   
   # Compute summary statistics based on the age group and compartment(s) selected with Time converted to YYYY-mm-dd if the start date field is populated
   get_statistics <- reactive({
-    if(nrow(run_model()$big_out) < 1 | is.null(input$compartment)) {
+    if(nrow(run_model()$big_out) < 1 | (is.null(input$compartment) & is.null(input$rate)) | is.null(input$max_time)) {
       return()
     } else {
       # Function to compute min counts 
       get_min_count <- function(df, variable_of_interest) {
-        df <- df %>% filter(Time < 365.25) %>% filter(!!rlang::sym(variable_of_interest) == min(!!rlang::sym(variable_of_interest))) %>% select(c(Time, all_of(variable_of_interest)))
+        df <- df %>% filter(Time <= input$max_time) %>% filter(!!rlang::sym(variable_of_interest) == min(!!rlang::sym(variable_of_interest))) %>% select(c(Time, all_of(variable_of_interest)))
         start_date <- get_start_date()
         if(! is.na(start_date)) {
           df$Time <- as.character(start_date + df$Time)
@@ -84,7 +86,7 @@ server <- function(input, output) {
       
       # Function to compute max counts
       get_max_count <- function(df, variable_of_interest) {
-        df <- df %>% filter(Time < 365.25) %>% filter(!!rlang::sym(variable_of_interest) == max(!!rlang::sym(variable_of_interest))) %>% select(c(Time, all_of(variable_of_interest)))
+        df <- df %>% filter(Time <= input$max_time) %>% filter(!!rlang::sym(variable_of_interest) == max(!!rlang::sym(variable_of_interest))) %>% select(c(Time, all_of(variable_of_interest)))
         start_date <- get_start_date()
         if(! is.na(start_date)) {
           df$Time <- as.character(start_date + df$Time)
@@ -93,13 +95,13 @@ server <- function(input, output) {
       }
       
       # Data frame with min stats
-      df1 <- as.data.frame(t(sapply(paste0(c(input$compartment, "IncI"), input$age_group), function(x) get_min_count(run_model()$big_out, x))))
+      df1 <- as.data.frame(t(sapply(paste0(c(input$compartment, input$rate), input$age_group), function(x) get_min_count(run_model()$big_out, x))))
       for(i in 1:ncol(df1)) {
         df1[,i] <- unname(unlist(df1[,i]))
       }
       
       # Data frame with max stats
-      df2 <- as.data.frame(t(sapply(paste0(c(input$compartment, "IncI"), input$age_group), function(x) get_max_count(run_model()$big_out, x))))
+      df2 <- as.data.frame(t(sapply(paste0(c(input$compartment, input$rate), input$age_group), function(x) get_max_count(run_model()$big_out, x))))
       for(i in 1:ncol(df2)) {
         df2[,i] <- unname(unlist(df2[,i]))
       }
@@ -108,7 +110,7 @@ server <- function(input, output) {
       df <- cbind(df1, df2 %>% select(-Description))
       
       # Convert variable names to long form
-      lookup <- tibble(short = c("S", "L_tot", "I_tot", "R", "D", "IncI"), long = c("Susceptible compartment", "Latent compartment", "Infected compartment", "Recovered compartment", "Dead compartment", "Incidence"))
+      lookup <- tibble(short = c("S", "L_tot", "I_tot", "R", "D", "IncI", "I_ssh", "I_aq", "Isolat"), long = c("Susceptible compartment", "Latent compartment", "Infected compartment", "Recovered compartment", "Dead compartment", "Incidence", "Hospitalized", "Quarantined", "Isolated"))
       df$Description <- lookup$long[match(gsub('[0-9]+', '', df$Description), lookup$short)]
       
       return(list(df = df))
@@ -135,6 +137,82 @@ server <- function(input, output) {
     }
   })
   
+  # Build line plot based on the age group and compartment(s) selected with Time converted to YYYY-mm-dd if the start date field is populated
+  output$compartment_plot <- renderPlotly({
+    # generate bins based on input$bins from ui.R
+    if(nrow(run_model()$big_out) < 1 | is.null(input$age_group) | (is.null(input$compartment) & is.null(input$rate)) | is.null(input$max_time)) {
+      return()
+    } else {
+      big_out <- run_model()$big_out
+      nagegrp <- run_model()$nagegrp
+      if (nagegrp > 1){
+        #variables_of_interest <- as.vector(sapply(c("S","L_tot","I_tot","R","D"), function(x) paste0(x, input$age_group)))
+        variables_of_interest <- as.vector(sapply(c(input$compartment, input$rate), function(x) paste0(x, input$age_group)))
+        timelimit <- input$max_time
+      } else {
+        #variables_of_interest <- c("S","L_tot1","I_tot1","R","D")
+        variables_of_interest <- c(input$compartment, input$rate)
+        variables_of_interest <- gsub("L_tot", "L_tot1", variables_of_interest)
+        variables_of_interest <- gsub("I_tot", "I_tot1", variables_of_interest)
+        timelimit <- input$max_time
+      }
+      big_out_graphs <- big_out %>%
+        select(c(Time, all_of(variables_of_interest))) %>%
+        filter(Time <= timelimit) # I set a limit of days for the graphics
+      
+      # if needs nagegrp and lookup0
+      get_plot <- function(data, age_group) {
+        # Subset the data frame to include only the vectors of interest
+        if (nagegrp > 1) {
+          data_subset <- filter(data, meta_key %in% paste0(c("S","L_tot","I_tot","R","D", input$rate), age_group))
+        } else {
+          data_subset <- filter(data, meta_key %in% c("S","L_tot1","I_tot1","R","D", input$rate))
+        }
+        
+        # Refactor the meta_key vector so that levels no longer represented in the vector are removed
+        data_subset$meta_key <- factor(data_subset$meta_key)
+        
+        # Add labels to the factor, which will also appear in the legend
+        lookup <- tibble(short = c("S", "L_tot", "I_tot", "R", "D", "IncI", "I_ssh", "I_aq", "Isolat"), long = c("Susceptible", "Latent", "Infected", "Recovered", "Dead", "Incidence", "Hospitalized", "Quarantined", "Isolated"))
+        data_subset$meta_key <- factor(data_subset$meta_key, levels = levels(data_subset$meta_key), labels = lookup$long[match(gsub('[0-9]+', '', variables_of_interest), lookup$short)])
+        
+        names(data_subset) <- c("Day", "Compartment", "Individuals")
+        data_subset$Individuals <- as.integer(data_subset$Individuals)
+        
+        start_date <- get_start_date()
+        if(! is.na(start_date)) {
+          data_subset$Day <- start_date + data_subset$Day
+          x_lab_label <- paste0("Time (since ", format(start_date, format = "%B %d, %Y"), ")")
+        } else {
+          x_lab_label = "Time (days)"
+        }
+        
+        # Output the plot
+        p <- ggplot(data_subset, aes(x = Day, y = Individuals)) +
+          geom_line(aes(color = Compartment), size = 0.85) +
+          ggtitle(paste0("SEIR model, age group ", age_group)) +
+          xlab(x_lab_label) +
+          ylab("Count (individuals)") +
+          scale_y_continuous(labels = comma) +
+          theme_minimal() +
+          theme(
+            plot.title = element_text(size = 12),
+            axis.title.x = element_text(size = 12),
+            axis.title.y = element_text(size = 12),
+            legend.text = element_text(size = 12),
+            legend.title = element_blank()
+          )
+        p <- ggplotly(p)
+      }
+      
+      # Reshape SEIR model output from wide to long format
+      big_out_long <- gather(big_out_graphs, key = meta_key, value = meta_value, 2:ncol(big_out_graphs), factor_key = TRUE)
+      
+      # Output the plots in a panel
+      get_plot(big_out_long, input$age_group)
+    }
+  })
+  
   # Render uploaded Excel file (the "inputs" sheet) in searchable/sortable table
   output$initial_conditions <- renderDT(
     get_inputs()$initial_conditions,
@@ -154,6 +232,15 @@ server <- function(input, output) {
       )
     )
   )
+  
+  # Build max_time menu based on the number of age groups detected in the uploaded Excel file
+  output$max_time <- renderUI({
+    if(is.null(run_model()$time_min) | is.null(run_model()$time_max)) { 
+      return() 
+    } else {
+      sliderInput("max_time", "Select maximum time", min = run_model()$time_min + 1, max = run_model()$time_max, value = 365, step = 1)
+    }
+  })
   
   # Render the SEIR model output in searchable/sortable table
   output$model_output = renderDT(
@@ -215,81 +302,15 @@ server <- function(input, output) {
     )
   )
   
-  # Build line plot based on the age group and compartment(s) selected with Time converted to YYYY-mm-dd if the start date field is populated
-  output$compartment_plot <- renderPlotly({
-    # generate bins based on input$bins from ui.R
-    if(nrow(run_model()$big_out) < 1 | is.null(input$age_group) | is.null(input$compartment)) {
-      return()
+  # Build rate menu
+  output$rate <- renderUI({
+    if(is.null(run_model()$nagegrp)) { 
+      return() 
     } else {
-      big_out <- run_model()$big_out
-      nagegrp <- run_model()$nagegrp
-      if (nagegrp > 1){
-        #variables_of_interest <- as.vector(sapply(c("S","L_tot","I_tot","R","D"), function(x) paste0(x, input$age_group)))
-        variables_of_interest <- as.vector(sapply(input$compartment, function(x) paste0(x, input$age_group)))
-        timelimit <- 365.25
-      } else {
-        #variables_of_interest <- c("S","L_tot1","I_tot1","R","D")
-        variables_of_interest <- input$compartment
-        variables_of_interest <- gsub("L_tot", "L_tot1", variables_of_interest)
-        variables_of_interest <- gsub("I_tot", "I_tot1", variables_of_interest)
-        timelimit <- 1500
-      }
-      big_out_graphs <- big_out %>%
-        select(c(Time, all_of(variables_of_interest))) %>%
-        filter(Time < timelimit) # I set a limit of days for the graphics
-      
-      # if needs nagegrp and lookup0
-      get_plot <- function(data, age_group) {
-        # Subset the data frame to include only the vectors of interest
-        if (nagegrp > 1) {
-          data_subset <- filter(data, meta_key %in% paste0(c("S","L_tot","I_tot","R","D"), age_group))
-        } else {
-          data_subset <- filter(data, meta_key %in% c("S","L_tot1","I_tot1","R","D"))
-        }
-        
-        # Refactor the meta_key vector so that levels no longer represented in the vector are removed
-        data_subset$meta_key <- factor(data_subset$meta_key)
-        
-        # Add labels to the factor, which will also appear in the legend
-        lookup <- tibble(short = c("S", "L_tot", "I_tot", "R", "D"), long = c("Susceptible", "Latent", "Infected", "Recovered", "Dead"))
-        data_subset$meta_key <- factor(data_subset$meta_key, levels = levels(data_subset$meta_key), labels = lookup$long[match(gsub('[0-9]+', '', variables_of_interest), lookup$short)])
-        
-        names(data_subset) <- c("Day", "Compartment", "Individuals")
-        data_subset$Individuals <- as.integer(data_subset$Individuals)
-        
-        start_date <- get_start_date()
-        if(! is.na(start_date)) {
-          data_subset$Day <- start_date + data_subset$Day
-          x_lab_label <- paste0("Time (since ", format(start_date, format = "%B %d, %Y"), ")")
-        } else {
-          x_lab_label = "Time (days)"
-        }
-        
-        # Output the plot
-        p <- ggplot(data_subset, aes(x = Day, y = Individuals)) +
-          geom_line(aes(color = Compartment), size = 0.85) +
-          ggtitle(paste0("SEIR model, age group ", age_group)) +
-          xlab(x_lab_label) +
-          ylab("Count (individuals)") +
-          scale_y_continuous(labels = comma) +
-          theme_minimal() +
-          theme(
-            plot.title = element_text(size = 12),
-            axis.title.x = element_text(size = 12),
-            axis.title.y = element_text(size = 12),
-            legend.text = element_text(size = 12),
-            legend.title = element_blank()
-          )
-        p <- ggplotly(p)
-      }
-      
-      # Reshape SEIR model output from wide to long format
-      big_out_long <- gather(big_out_graphs, key = meta_key, value = meta_value, 2:ncol(big_out_graphs), factor_key = TRUE)
-      
-      # Output the plots in a panel
-      get_plot(big_out_long, input$age_group)
+      checkboxGroupInput("rate", label = "Select other statistics", choices = list("Incidence" = "IncI", "Hospitalized" = "I_ssh", "Quarantined" = "I_aq", "Isolated" = "Isolat"), selected = c(""))
     }
   })
+  
   
   # Build start date field
   output$start_date <- renderUI({
@@ -325,7 +346,7 @@ server <- function(input, output) {
     # generate bins based on input$bins from ui.R
     file_to_read <- input$file
     if(is.null(file_to_read)) {
-      return(list(big_out = data.frame(), nagegrp = NULL, columns = NULL))
+      return(list(big_out = data.frame(), nagegrp = NULL, time_min = NULL, time_max = NULL, columns = NULL))
     } else {
       source("UtilitiesChunks.R")
       source("SEIR.n.Age.Classes.R")
@@ -365,10 +386,9 @@ server <- function(input, output) {
       for(i in 1:nagegrp) {
         sigma <- as.numeric(parameters_by_age %>% filter(agegrp == i) %>% select(sigma) %>% slice(1))
         v <- c()
-        I_tot <- big_out %>% select(all_of(paste0("I_tot", i)))
-        I_tot <- I_tot[,1]
-        L_tot <- big_out %>% select(all_of(paste0("L_tot", i)))
-        L_tot <- L_tot[,1]
+        I_tot <- unname(unlist(big_out %>% select(all_of(paste0("I_tot", i)))))
+        L_tot <- unname(unlist(big_out %>% select(all_of(paste0("L_tot", i)))))
+        
         for(j in 1:nrow(big_out)) {
           if(j == 1) {
             v[j] <- I_tot[1]
@@ -379,12 +399,23 @@ server <- function(input, output) {
         big_out[[paste0("IncI", i)]] <- assign(paste0("IncI", i), v)
       } 
       
+      # Compute Isolated
+      for(i in 1:nagegrp) {
+        I_smis <- unname(unlist(big_out %>% select(all_of(paste0("I_smis", i)))))
+        I_ssis <- unname(unlist(big_out %>% select(all_of(paste0("I_ssis", i)))))
+        v <- c()
+        for(j in 1:nrow(big_out)) {
+          v[j] <- I_smis[j] + I_ssis[j]
+        }
+        big_out[[paste0("Isolat", i)]] <- assign(paste0("Isolat", i), v)
+      } 
+      
       # Organize model output vectors alphabetically
       big_out <- big_out %>% select(order(colnames(big_out))) %>% select(time, everything())
       
       # Rename the time vector
       colnames(big_out)[1] <- "Time"
-      return(list(big_out = big_out, nagegrp = nagegrp, sheet_names = sheet_names_v2))
+      return(list(big_out = big_out, nagegrp = nagegrp, sheet_names = sheet_names_v2, time_min = min(parameters_by_age$tmin), time_max = max(parameters_by_age$tmax)))
     }
   })
 }

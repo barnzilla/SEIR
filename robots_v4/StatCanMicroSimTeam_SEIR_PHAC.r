@@ -29,8 +29,8 @@ rm(list = ls())
 #==========================================================================
 
 package_names <- c("janitor","readxl","dplyr","deSolve","tidyr","ggplot2", "ggpubr", "tidyverse", "viridis") 
+install_packages <- lapply(package_names, FUN = function(x) if(! require(x, character.only = TRUE)) install.packages(x))
 load_packages <- lapply(package_names, require, character.only = TRUE)
-
 
 ### User input parameters
 WDir <- "C:/Users/maiko/Downloads/SEIR_Model"             # working directory **** NO TRAILING /   akin to choose.dir()  ****
@@ -103,6 +103,7 @@ if(FALSE) # example of a parameter sweep
 
 # continue on below with listOut as before but should consider using results$solution
 listOut = results$listOut.to.be.decomissioned  
+listOut = results$solution 
 nagegrp = ncol(results$input.info$initial.conditions)-1
 
 # Merge the data
@@ -187,4 +188,38 @@ plots <- lapply(1:nagegrp, FUN = get_plot, data = big_out_long)
 # Output the plots in a panel
 ggarrange(plotlist = plots, ncol = 2, nrow = ceiling(length(plots)/ 2), common.legend = TRUE) # two plots by row
 #ggarrange(plotlist = plots, ncol = 1, nrow = length(plots), common.legend = TRUE)            # one plot by row
+
+# Compute incidence
+for(i in 1:nagegrp) {
+  v <- c()
+  I_tot <- big_out %>% select(all_of(paste0("I_tot", i)))
+  I_tot <- I_tot[,1]
+  L_tot <- big_out %>% select(all_of(paste0("L_tot", i)))
+  L_tot <- L_tot[,1]
+  for(j in 1:nrow(big_out)) {
+    if(j == 1) {
+      v[j] <- I_tot[1]
+    } else {
+      v[j] <- L_tot[j - 1] * 0.27027 
+    }
+  }
+  big_out[[paste0("IncI", i)]] <- assign(paste0("IncI", i), v)
+} 
+
+
+View(big_out)
+
+sum(big_out$I_smis1, big_out$I_ssis1)
+sum(big_out$I_smis2, big_out$I_ssis2)
+
+# Compute Isolated
+for(i in 1:nagegrp) {
+  I_smis <- unname(unlist(big_out %>% select(all_of(paste0("I_smis", i)))))
+  I_ssis <- unname(unlist(big_out %>% select(all_of(paste0("I_ssis", i)))))
+  v <- c()
+  for(j in 1:nrow(big_out)) {
+    v[j] <- I_smis[j] + I_ssis[j]
+  }
+  big_out[[paste0("Isolat", i)]] <- assign(paste0("Isolat", i), v)
+} 
 
