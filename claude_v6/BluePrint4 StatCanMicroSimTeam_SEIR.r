@@ -35,6 +35,7 @@ load_packages <- lapply(package_names, require, character.only = TRUE)
 ### User input parameters
 WDir <- "C:/Users/maiko/Downloads/SEIR_Model"             # working directory **** NO TRAILING /   akin to choose.dir()  ****
 WDir <- "C:/Users/Cloud/Desktop/WORK/PHAC/SEIR-Claude/v6" # working directory **** NO TRAILING /   akin to choose.dir()  ****
+WDir <- "c:/users/joel/google drive/github/seir/claude_v6"
 #WDir <- choose.dir() # this does not generate a trailing slash or backslash
 cat(WDir)  # show folder chosen
 setwd(WDir)
