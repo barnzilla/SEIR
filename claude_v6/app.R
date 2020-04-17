@@ -348,11 +348,9 @@ server <- function(input, output) {
     } else {
       source("UtilitiesChunks.R")
       source("SEIR.n.Age.Classes.R")
-      sheet_names_v2 = list(initial.conditions="Initial conditions",parms.1d="Parameters by Age",parms.2d="Parameters by Age x Age",model.flow="Model Specs v2",auxiliary.vars="Intermediate calculations")
+      sheet_names.FALSE = list(initial.conditions="Initial conditions",parms.1d="Parameters by Age",parms.2d="Parameters by Age x Age",model.flow="Model Specs (use with FALSE)",auxiliary.vars="Intermediate calculations")
       
-      results.sheet.v2.good = SEIR.n.Age.Classes(file_to_read$datapath,sheet_names_v2,seq(0,1499,1) ) # scale.rate.to.size  FALSE by default now      
-    
-      results = results.sheet.v2.good
+      results = SEIR.n.Age.Classes(file_to_read$datapath,sheet_names.FALSE,  scale.rate.to.size = FALSE )
       
       # continue on below with listOut as before but should consider using results$solution
       #listOut = results$listOut.to.be.decomissioned  
@@ -378,7 +376,7 @@ server <- function(input, output) {
         varsc<-names(big_out)[grepl(p,names(big_out))]
       }
       
-      parameters_by_age <- as.data.frame.from.tbl(readxl::read_excel(file_to_read$datapath, sheet = sheet_names_v2$parms.1d))
+      parameters_by_age <- as.data.frame.from.tbl(readxl::read_excel(file_to_read$datapath, sheet = sheet_names.FALSE$parms.1d))
       
       # Compute incidence
       for(i in 1:nagegrp) {
@@ -413,7 +411,7 @@ server <- function(input, output) {
       
       # Rename the time vector
       colnames(big_out)[1] <- "Time"
-      return(list(big_out = big_out, nagegrp = nagegrp, sheet_names = sheet_names_v2, time_min = min(parameters_by_age$tmin), time_max = max(parameters_by_age$tmax), lookup = tibble(short = c("S", "L_tot", "I_tot", "R", "D", "IncI", "I_ssh", "I_aq", "Isolat"), long = c("Susceptible compartment", "Latent compartment", "Infected compartment", "Recovered compartment", "Dead compartment", "Incidence", "Hospitalized", "Quarantined", "Isolated"))))
+      return(list(big_out = big_out, nagegrp = nagegrp, sheet_names = sheet_names.FALSE, time_min = min(parameters_by_age$tmin), time_max = max(parameters_by_age$tmax), lookup = tibble(short = c("S", "L_tot", "I_tot", "R", "D", "IncI", "I_ssh", "I_aq", "Isolat"), long = c("Susceptible compartment", "Latent compartment", "Infected compartment", "Recovered compartment", "Dead compartment", "Incidence", "Hospitalized", "Quarantined", "Isolated"))))
     }
   })
 }
