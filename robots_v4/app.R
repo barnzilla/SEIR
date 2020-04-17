@@ -110,8 +110,7 @@ server <- function(input, output) {
       df <- cbind(df1, df2 %>% select(-Description))
       
       # Convert variable names to long form
-      lookup <- tibble(short = c("S", "L_tot", "I_tot", "R", "D", "IncI", "I_ssh", "I_aq", "Isolat"), long = c("Susceptible compartment", "Latent compartment", "Infected compartment", "Recovered compartment", "Dead compartment", "Incidence", "Hospitalized", "Quarantined", "Isolated"))
-      df$Description <- lookup$long[match(gsub('[0-9]+', '', df$Description), lookup$short)]
+      df$Description <- run_model()$lookup$long[match(gsub('[0-9]+', '', df$Description), run_model()$lookup$short)]
       
       return(list(df = df))
     }
@@ -173,8 +172,7 @@ server <- function(input, output) {
         data_subset$meta_key <- factor(data_subset$meta_key)
         
         # Add labels to the factor, which will also appear in the legend
-        lookup <- tibble(short = c("S", "L_tot", "I_tot", "R", "D", "IncI", "I_ssh", "I_aq", "Isolat"), long = c("Susceptible", "Latent", "Infected", "Recovered", "Dead", "Incidence", "Hospitalized", "Quarantined", "Isolated"))
-        data_subset$meta_key <- factor(data_subset$meta_key, levels = levels(data_subset$meta_key), labels = lookup$long[match(gsub('[0-9]+', '', variables_of_interest), lookup$short)])
+        data_subset$meta_key <- factor(data_subset$meta_key, levels = levels(data_subset$meta_key), labels = gsub("compartment", "", run_model()$lookup$long[match(gsub('[0-9]+', '', variables_of_interest), run_model()$lookup$short)]))
         
         names(data_subset) <- c("Day", "Compartment", "Individuals")
         data_subset$Individuals <- as.integer(data_subset$Individuals)
@@ -346,7 +344,7 @@ server <- function(input, output) {
     # generate bins based on input$bins from ui.R
     file_to_read <- input$file
     if(is.null(file_to_read)) {
-      return(list(big_out = data.frame(), nagegrp = NULL, time_min = NULL, time_max = NULL, columns = NULL))
+      return(list(big_out = data.frame(), nagegrp = NULL, time_min = NULL, time_max = NULL, lookup = NULL, columns = NULL))
     } else {
       source("UtilitiesChunks.R")
       source("SEIR.n.Age.Classes.R")
@@ -415,7 +413,7 @@ server <- function(input, output) {
       
       # Rename the time vector
       colnames(big_out)[1] <- "Time"
-      return(list(big_out = big_out, nagegrp = nagegrp, sheet_names = sheet_names_v2, time_min = min(parameters_by_age$tmin), time_max = max(parameters_by_age$tmax)))
+      return(list(big_out = big_out, nagegrp = nagegrp, sheet_names = sheet_names_v2, time_min = min(parameters_by_age$tmin), time_max = max(parameters_by_age$tmax), lookup = tibble(short = c("S", "L_tot", "I_tot", "R", "D", "IncI", "I_ssh", "I_aq", "Isolat"), long = c("Susceptible compartment", "Latent compartment", "Infected compartment", "Recovered compartment", "Dead compartment", "Incidence", "Hospitalized", "Quarantined", "Isolated"))))
     }
   })
 }
