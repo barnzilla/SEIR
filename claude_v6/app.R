@@ -22,6 +22,7 @@ ui <- fluidPage(
   sidebarLayout(
     sidebarPanel(
       fileInput("file", "Upload model parameters (Excel file)"),
+      uiOutput("model_specs_toggle"),
       uiOutput("age_group"),
       uiOutput("compartment"),
       #uiOutput("rate"),
@@ -114,6 +115,11 @@ server <- function(input, output) {
       
       return(list(df = df))
     }
+  })
+  
+  # Build true/false option
+  output$model_specs_toggle <- renderUI({
+    radioButtons("model_specs_toggle", "Model specs toggle", choices = c("TRUE" = "t", "FALSE" = "f"), selected = "t")
   })
   
   # Build age group menu based on the number of age groups detected in the uploaded Excel file
@@ -348,8 +354,17 @@ server <- function(input, output) {
     } else {
       source("UtilitiesChunks.R")
       source("SEIR.n.Age.Classes.R")
-      sheet_names.TRUE = list(initial.conditions="Initial conditions",parms.1d="Parameters by Age",parms.2d="Parameters by Age x Age",model.flow="Model Specs (use with TRUE)" ,auxiliary.vars="Intermediate calculations")
-      results = SEIR.n.Age.Classes(file_to_read$datapath,sheet_names.TRUE ,  scale.rate.to.size = TRUE  )
+      if(input$model_specs_toggle == "f") {
+        model_flow_choice <- "Model Specs (use with FALSE)"
+        toggle <- FALSE
+        
+      } else {
+        model_flow_choice <- "Model Specs (use with TRUE)"
+        toggle <- TRUE
+      }
+      sheet_names = list(initial.conditions="Initial conditions",parms.1d="Parameters by Age",parms.2d="Parameters by Age x Age",model.flow = model_flow_choice ,auxiliary.vars="Intermediate calculations")
+      sheet_names$scale.rate.to.size <- toggle
+      results = SEIR.n.Age.Classes(file_to_read$datapath,sheet_names ,  scale.rate.to.size = toggle  )
       
       # continue on below with listOut as before but should consider using results$solution
       #listOut = results$listOut.to.be.decomissioned  
@@ -375,14 +390,14 @@ server <- function(input, output) {
         varsc<-names(big_out)[grepl(p,names(big_out))]
       }
       
-      parameters_by_age <- as.data.frame.from.tbl(readxl::read_excel(file_to_read$datapath, sheet = sheet_names.TRUE$parms.1d))
+      parameters_by_age <- as.data.frame.from.tbl(readxl::read_excel(file_to_read$datapath, sheet = sheet_names$parms.1d))
       
       # Organize model output vectors alphabetically
       big_out <- big_out %>% select(order(colnames(big_out))) %>% select(time, everything())
       
       # Rename the time vector
       colnames(big_out)[1] <- "Time"
-      return(list(big_out = big_out, nagegrp = nagegrp, sheet_names = sheet_names.TRUE, time_min = min(parameters_by_age$tmin), time_max = max(parameters_by_age$tmax), lookup = tibble(short = c("S", "L_tot", "I_tot", "R", "D", "I_ssh", "I_aq"), long = c("Susceptible compartment", "Latent compartment", "Infected compartment", "Recovered compartment", "Dead compartment", "Hospitalized", "Quarantined"))))
+      return(list(big_out = big_out, nagegrp = nagegrp, sheet_names = sheet_names, time_min = min(parameters_by_age$tmin), time_max = max(parameters_by_age$tmax), lookup = tibble(short = c("S", "L_tot", "I_tot", "R", "D", "I_ssh", "I_aq"), long = c("Susceptible compartment", "Latent compartment", "Infected compartment", "Recovered compartment", "Dead compartment", "Hospitalized", "Quarantined"))))
     }
   })
 }
