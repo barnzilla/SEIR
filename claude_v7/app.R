@@ -22,7 +22,6 @@ ui <- fluidPage(
   sidebarLayout(
     sidebarPanel(
       fileInput("file", "Upload model parameters (Excel file)"),
-      uiOutput("model_specs_toggle"),
       uiOutput("age_group"),
       uiOutput("compartment"),
       uiOutput("other_outcome"),
@@ -133,11 +132,6 @@ server <- function(input, output) {
       output <- run_model()$big_out %>% select(-column_label)
     }
   }
-  
-  # Build true/false option
-  output$model_specs_toggle <- renderUI({
-    radioButtons("model_specs_toggle", "Scale rate to size?", choices = c("Yes" = "t", "No" = "f"), selected = "t")
-  })
   
   # Build age group menu based on the number of age groups detected in the uploaded Excel file
   output$age_group <- renderUI({
@@ -371,17 +365,9 @@ server <- function(input, output) {
     } else {
       source("UtilitiesChunks.R")
       source("SEIR.n.Age.Classes.R")
-      if(input$model_specs_toggle == "f") {
-        model_flow_choice <- "Model Specs (use with FALSE)"
-        toggle <- FALSE
-        
-      } else {
-        model_flow_choice <- "Model Specs (use with TRUE)"
-        toggle <- TRUE
-      }
-      sheet_names = list(initial.conditions="Initial conditions",parms.1d="Parameters by Age",parms.2d="Parameters by Age x Age",model.flow = model_flow_choice ,auxiliary.vars="Intermediate calculations")
-      sheet_names$scale.rate.to.size <- toggle
-      results = SEIR.n.Age.Classes(file_to_read$datapath,sheet_names ,  scale.rate.to.size = toggle  )
+      
+      sheet_names <- list(initial.conditions = "Initial conditions", parms.1d = "Parameters by Age" , parms.2d = "Parameters by Age x Age", model.flow = "Model Specs (lazy)", auxiliary.vars = "Intermediate calculations")
+      results <- SEIR.n.Age.Classes(file_to_read$datapath, sheet_names.lazy)
       
       # continue on below with listOut as before but should consider using results$solution
       #listOut = results$listOut.to.be.decomissioned  
