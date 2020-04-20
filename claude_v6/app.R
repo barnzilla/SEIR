@@ -95,14 +95,22 @@ server <- function(input, output) {
         df <- tibble(Description = names(df)[2], Max = as.integer(df[,2]), Day = df$Time)
       }
       
+      if (run_model()$nagegrp > 1){
+        variables_of_interest <- as.vector(sapply(c(input$compartment, input$rate), function(x) paste0(x, input$age_group)))
+      } else {
+        variables_of_interest <- c(input$compartment, input$rate)
+        variables_of_interest <- gsub("L_tot", "L_tot1", variables_of_interest)
+        variables_of_interest <- gsub("I_tot", "I_tot1", variables_of_interest)
+      }
+      
       # Data frame with min stats
-      df1 <- as.data.frame(t(sapply(paste0(c(input$compartment, input$rate), input$age_group), function(x) get_min_count(run_model()$big_out, x))))
+      df1 <- as.data.frame(t(sapply(variables_of_interest, function(x) get_min_count(run_model()$big_out, x))))
       for(i in 1:ncol(df1)) {
         df1[,i] <- unname(unlist(df1[,i]))
       }
       
       # Data frame with max stats
-      df2 <- as.data.frame(t(sapply(paste0(c(input$compartment, input$rate), input$age_group), function(x) get_max_count(run_model()$big_out, x))))
+      df2 <- as.data.frame(t(sapply(variables_of_interest, function(x) get_max_count(run_model()$big_out, x))))
       for(i in 1:ncol(df2)) {
         df2[,i] <- unname(unlist(df2[,i]))
       }
@@ -116,6 +124,15 @@ server <- function(input, output) {
       return(list(df = df))
     }
   })
+  
+  # Get variable names for model output tab, depending on how many total age groups are in the model
+  get_variable_names <- function() {
+    if (run_model()$nagegrp > 1){
+      output <- run_model()$big_out[,grepl(paste0("Time|", input$age_group, collapse = ""), names(run_model()$big_out))]
+    } else {
+      output <- run_model()$big_out %>% select(-column_label)
+    }
+  }
   
   # Build true/false option
   output$model_specs_toggle <- renderUI({
@@ -248,7 +265,7 @@ server <- function(input, output) {
   
   # Render the SEIR model output in searchable/sortable table
   output$model_output = renderDT(
-    run_model()$big_out[,grepl(paste0("Time|", input$age_group, collapse = ""), names(run_model()$big_out))] %>% round(),
+    get_variable_names() %>% round(3),
     extensions = c("Buttons", "Scroller"), 
     rownames = FALSE,
     options = list(
@@ -374,7 +391,7 @@ server <- function(input, output) {
       # Merge the data
       big_out <- bind_rows(listOut, .id = "column_label") %>% distinct(time, .keep_all= TRUE)
       xx <- yy <- df <- df2 <- NULL
-      for (p in 1: nagegrp){
+      for (p in 1:nagegrp){
         if (nagegrp>1){varsc<-names(big_out)[grepl(p,names(big_out))]}else{varsc<-names(big_out)}
         df <-big_out %>% 
           select(one_of(varsc))
@@ -397,6 +414,8 @@ server <- function(input, output) {
       
       # Rename the time vector
       colnames(big_out)[1] <- "Time"
+      
+      # Return the model output
       return(list(big_out = big_out, nagegrp = nagegrp, sheet_names = sheet_names, time_min = min(parameters_by_age$tmin), time_max = max(parameters_by_age$tmax), lookup = tibble(short = c("S", "L_tot", "I_tot", "R", "D", "I_ssh", "I_aq"), long = c("Susceptible compartment", "Latent compartment", "Infected compartment", "Recovered compartment", "Dead compartment", "Hospitalized", "Quarantined"))))
     }
   })
