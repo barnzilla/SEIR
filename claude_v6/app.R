@@ -25,7 +25,7 @@ ui <- fluidPage(
       uiOutput("model_specs_toggle"),
       uiOutput("age_group"),
       uiOutput("compartment"),
-      #uiOutput("rate"),
+      uiOutput("other_outcome"),
       uiOutput("start_date"),
       uiOutput("max_time"),
       width = 3
@@ -72,7 +72,7 @@ server <- function(input, output) {
   
   # Compute summary statistics based on the age group and compartment(s) selected with Time converted to YYYY-mm-dd if the start date field is populated
   get_statistics <- reactive({
-    if(nrow(run_model()$big_out) < 1 | (is.null(input$compartment) & is.null(input$rate)) | is.null(input$max_time)) {
+    if(nrow(run_model()$big_out) < 1 | (is.null(input$compartment) & is.null(input$other_outcome)) | is.null(input$max_time)) {
       return()
     } else {
       # Function to compute min counts 
@@ -96,9 +96,9 @@ server <- function(input, output) {
       }
       
       if (run_model()$nagegrp > 1){
-        variables_of_interest <- as.vector(sapply(c(input$compartment, input$rate), function(x) paste0(x, input$age_group)))
+        variables_of_interest <- as.vector(sapply(c(input$compartment, input$other_outcome), function(x) paste0(x, input$age_group)))
       } else {
-        variables_of_interest <- c(input$compartment, input$rate)
+        variables_of_interest <- c(input$compartment, input$other_outcome)
         variables_of_interest <- gsub("L_tot", "L_tot1", variables_of_interest)
         variables_of_interest <- gsub("I_tot", "I_tot1", variables_of_interest)
       }
@@ -136,7 +136,7 @@ server <- function(input, output) {
   
   # Build true/false option
   output$model_specs_toggle <- renderUI({
-    radioButtons("model_specs_toggle", "Model specs toggle", choices = c("TRUE" = "t", "FALSE" = "f"), selected = "t")
+    radioButtons("model_specs_toggle", "Scale rate to size?", choices = c("Yes" = "t", "No" = "f"), selected = "t")
   })
   
   # Build age group menu based on the number of age groups detected in the uploaded Excel file
@@ -162,18 +162,18 @@ server <- function(input, output) {
   # Build line plot based on the age group and compartment(s) selected with Time converted to YYYY-mm-dd if the start date field is populated
   output$compartment_plot <- renderPlotly({
     # generate bins based on input$bins from ui.R
-    if(nrow(run_model()$big_out) < 1 | is.null(input$age_group) | (is.null(input$compartment) & is.null(input$rate)) | is.null(input$max_time)) {
+    if(nrow(run_model()$big_out) < 1 | is.null(input$age_group) | (is.null(input$compartment) & is.null(input$other_outcome)) | is.null(input$max_time)) {
       return()
     } else {
       big_out <- run_model()$big_out
       nagegrp <- run_model()$nagegrp
       if (nagegrp > 1){
         #variables_of_interest <- as.vector(sapply(c("S","L_tot","I_tot","R","D"), function(x) paste0(x, input$age_group)))
-        variables_of_interest <- as.vector(sapply(c(input$compartment, input$rate), function(x) paste0(x, input$age_group)))
+        variables_of_interest <- as.vector(sapply(c(input$compartment, input$other_outcome), function(x) paste0(x, input$age_group)))
         timelimit <- input$max_time
       } else {
         #variables_of_interest <- c("S","L_tot1","I_tot1","R","D")
-        variables_of_interest <- c(input$compartment, input$rate)
+        variables_of_interest <- c(input$compartment, input$other_outcome)
         variables_of_interest <- gsub("L_tot", "L_tot1", variables_of_interest)
         variables_of_interest <- gsub("I_tot", "I_tot1", variables_of_interest)
         timelimit <- input$max_time
@@ -182,13 +182,12 @@ server <- function(input, output) {
         select(c(Time, all_of(variables_of_interest))) %>%
         filter(Time <= timelimit) # I set a limit of days for the graphics
       
-      # if needs nagegrp and lookup0
       get_plot <- function(data, age_group) {
         # Subset the data frame to include only the vectors of interest
         if (nagegrp > 1) {
-          data_subset <- filter(data, meta_key %in% paste0(c("S","L_tot","I_tot","R","D", input$rate), age_group))
+          data_subset <- filter(data, meta_key %in% paste0(c("S","L_tot","I_tot","R","D", input$other_outcome), age_group))
         } else {
-          data_subset <- filter(data, meta_key %in% c("S","L_tot1","I_tot1","R","D", input$rate))
+          data_subset <- filter(data, meta_key %in% c("S","L_tot1","I_tot1","R","D", input$other_outcome))
         }
         
         # Refactor the meta_key vector so that levels no longer represented in the vector are removed
@@ -323,12 +322,13 @@ server <- function(input, output) {
     )
   )
   
-  # Build rate menu
-  output$rate <- renderUI({
+  # Build other_outcome menu
+  output$other_outcome <- renderUI({
     if(is.null(run_model()$nagegrp)) { 
       return() 
     } else {
-      checkboxGroupInput("rate", label = "Select other statistics", choices = list("Hospitalized" = "I_ssh", "Quarantined" = "I_aq"), selected = c(""))
+      #checkboxGroupInput("other_outcome", label = "Select other outcomes", choices = list("Hospitalized" = "I_ssh", "Quarantined" = "I_aq"), selected = c(""))
+      checkboxGroupInput("other_outcome", label = "Select other outcomes", choices = list("Incidence (new cases per day)" = "IncI"), selected = c(""))
     }
   })
   
@@ -364,7 +364,7 @@ server <- function(input, output) {
   
   # Run SEIR model by age groups
   run_model <- reactive({
-    # generate bins based on input$bins from ui.R
+    # geneother_outcome bins based on input$bins from ui.R
     file_to_read <- input$file
     if(is.null(file_to_read)) {
       return(list(big_out = data.frame(), nagegrp = NULL, time_min = NULL, time_max = NULL, lookup = NULL, columns = NULL))
@@ -409,6 +409,23 @@ server <- function(input, output) {
       
       parameters_by_age <- as.data.frame.from.tbl(readxl::read_excel(file_to_read$datapath, sheet = sheet_names$parms.1d))
       
+      # Compute incidence	(number of new cases each day, over time [incidence])
+      for(i in 1:nagegrp) {	
+        v <- c()	
+        I_tot <- unname(unlist(big_out %>% select(all_of(paste0("I_tot", i)))))	
+        L_tot <- unname(unlist(big_out %>% select(all_of(paste0("L_tot", i)))))	
+        
+        for(j in 1:nrow(big_out)) {	
+          if(j == 1) {	
+            v[j] <- I_tot[1]	
+          } else {	
+            sigma <- 1 / as.numeric(parameters_by_age %>% filter(agegrp == i & big_out$time[j] > tmin & big_out$time[j] <= tmax ) %>% select(t_latency))
+            v[j] <- L_tot[j - 1] * sigma
+          }	
+        }	
+        big_out[[paste0("IncI", ifelse(nagegrp > 1, i, ""))]] <- assign(paste0("IncI", i), v)	
+      } 
+      
       # Organize model output vectors alphabetically
       big_out <- big_out %>% select(order(colnames(big_out))) %>% select(time, everything())
       
@@ -416,7 +433,7 @@ server <- function(input, output) {
       colnames(big_out)[1] <- "Time"
       
       # Return the model output
-      return(list(big_out = big_out, nagegrp = nagegrp, sheet_names = sheet_names, time_min = min(parameters_by_age$tmin), time_max = max(parameters_by_age$tmax), lookup = tibble(short = c("S", "L_tot", "I_tot", "R", "D", "I_ssh", "I_aq"), long = c("Susceptible compartment", "Latent compartment", "Infected compartment", "Recovered compartment", "Dead compartment", "Hospitalized", "Quarantined"))))
+      return(list(big_out = big_out, nagegrp = nagegrp, sheet_names = sheet_names, time_min = min(parameters_by_age$tmin), time_max = max(parameters_by_age$tmax), lookup = tibble(short = c("S", "L_tot", "I_tot", "R", "D", "IncI", "I_ssh", "I_aq"), long = c("Susceptible compartment", "Latent compartment", "Infected compartment", "Recovered compartment", "Dead compartment", "Incidence", "Hospitalized", "Quarantined"))))
     }
   })
 }
