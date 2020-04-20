@@ -321,8 +321,7 @@ server <- function(input, output) {
     if(is.null(run_model()$nagegrp)) { 
       return() 
     } else {
-      #checkboxGroupInput("other_outcome", label = "Select other outcomes", choices = list("Hospitalized" = "I_ssh", "Quarantined" = "I_aq"), selected = c(""))
-      checkboxGroupInput("other_outcome", label = "Select other outcomes", choices = list("Incidence (new cases per day)" = "IncI"), selected = c(""))
+      checkboxGroupInput("other_outcome", label = "Select other outcomes", choices = list("Incidence (new cases per day)" = "IncI", "Cumulative incidence" = "cumI", "Hospitalized" = "Iss_hosp", "Quarantined" = "I_aq", "Isolated" = "Isolat"), selected = c(""))
     }
   })
   
@@ -400,6 +399,12 @@ server <- function(input, output) {
         v <- c()	
         I_tot <- unname(unlist(big_out %>% select(all_of(paste0("I_tot", i)))))	
         L_tot <- unname(unlist(big_out %>% select(all_of(paste0("L_tot", i)))))	
+        Lq <- unname(unlist(big_out %>% select(all_of(paste0("Lq", ifelse(nagegrp > 1, i, ""))))))	
+        Iq_pres <- unname(unlist(big_out %>% select(all_of(paste0("Iq_pres", ifelse(nagegrp > 1, i, ""))))))	
+        Iaq_r <- unname(unlist(big_out %>% select(all_of(paste0("Iaq_r", ifelse(nagegrp > 1, i, ""))))))	
+        Ism_iso <- unname(unlist(big_out %>% select(all_of(paste0("Ism_iso", ifelse(nagegrp > 1, i, ""))))))
+        Iss_isohome <- unname(unlist(big_out %>% select(all_of(paste0("Iss_isohome", ifelse(nagegrp > 1, i, ""))))))
+        
         
         for(j in 1:nrow(big_out)) {	
           if(j == 1) {	
@@ -409,7 +414,10 @@ server <- function(input, output) {
             v[j] <- L_tot[j - 1] * sigma
           }	
         }	
-        big_out[[paste0("IncI", ifelse(nagegrp > 1, i, ""))]] <- assign(paste0("IncI", i), v)	
+        big_out[[paste0("IncI", ifelse(nagegrp > 1, i, ""))]] <- v
+        big_out[[paste0("cumI", ifelse(nagegrp > 1, i, ""))]] <- cumsum(v)
+        big_out[[paste0("I_aq", ifelse(nagegrp > 1, i, ""))]] <- Lq + Iq_pres + Iaq_r
+        big_out[[paste0("Isolat", ifelse(nagegrp > 1, i, ""))]] <- Ism_iso + Iss_isohome
       } 
       
       # Organize model output vectors alphabetically
@@ -419,7 +427,7 @@ server <- function(input, output) {
       colnames(big_out)[1] <- "Time"
       
       # Return the model output
-      return(list(big_out = big_out, nagegrp = nagegrp, sheet_names = sheet_names, time_min = min(parameters_by_age$tmin), time_max = max(parameters_by_age$tmax), lookup = tibble(short = c("S", "L_tot", "I_tot", "R", "D", "IncI", "I_ssh", "I_aq"), long = c("Susceptible compartment", "Latent compartment", "Infected compartment", "Recovered compartment", "Dead compartment", "Incidence", "Hospitalized", "Quarantined"))))
+      return(list(big_out = big_out, nagegrp = nagegrp, sheet_names = sheet_names, time_min = min(parameters_by_age$tmin), time_max = max(parameters_by_age$tmax), lookup = tibble(short = c("S", "L_tot", "I_tot", "R", "D", "IncI", "cumI", "Iss_hosp", "I_aq", "Isolat"), long = c("Susceptible compartment", "Latent compartment", "Infected compartment", "Recovered compartment", "Dead compartment", "Incidence", "Cumulative incidence", "Hospitalized", "Quarantined", "Isolated"))))
     }
   })
 }
