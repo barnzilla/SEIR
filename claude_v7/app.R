@@ -32,6 +32,7 @@ ui <- fluidPage(
     mainPanel(
       tabsetPanel(
         tabPanel("Summary", htmlOutput("plot_title"), plotlyOutput("compartment_plot") %>% withSpinner(color = "#337ab7"), htmlOutput("summary_statistics_title"), DTOutput("summary_statistics"), br()),
+        tabPanel("Parameter sweep", br(), uiOutput("parameter_to_sweep"), DTOutput("parameter_sweep_output") %>% withSpinner(color = "#337ab7")),
         tabPanel("Model output", br(), DTOutput("model_output") %>% withSpinner(color = "#337ab7")),
         tabPanel("Initial conditions", br(), DTOutput("initial_conditions") %>% withSpinner(color = "#337ab7")),
         tabPanel("Parameters by age", br(), DTOutput("parameters_by_age") %>% withSpinner(color = "#337ab7")),
@@ -44,6 +45,76 @@ ui <- fluidPage(
 
 # Define server logic 
 server <- function(input, output) {
+  # Build age group menu based on the number of age groups detected in the uploaded Excel file
+  output$parameter_to_sweep <- renderUI({
+    if(is.null(run_model()$nagegrp)) { 
+      return() 
+    } else {
+      parameters <- names(run_model()$results$input.info$parms.1d)
+      parameters <- parameters[! parameters %in% c("tmin", "tmax", "agegrp")]
+      parameters <- sort(parameters)
+      names(parameters) <- parameters
+      parameters <- c("Please select..." = 0, parameters)
+      selectInput("parameter_to_sweep", "Select parameter to sweep", choices = parameters, selected = 0)
+    }
+  })
+  
+  output$parameter_sweep_output <- renderDT(
+    get_parameter_sweep_df(),
+    extensions = c("Buttons", "Scroller"), 
+    rownames = FALSE,
+    options = list(
+      columnDefs = list(list(visible = FALSE, targets = c())),
+      pageLength = 10, 
+      dom = "Bfrtip", 
+      buttons = c("colvis", "copy", "csv", "excel", "pdf"), 
+      deferRender = TRUE, 
+      searchDelay = 500,
+      initComplete = JS(
+        "function(settings, json) {",
+        "$(this.api().table().header()).css({'background-color': '#fff', 'color': '#111'});",
+        "}"
+      )
+    )
+  )
+  
+  # Render HTML title for the plot
+  get_parameter_sweep_df <- reactive({
+    if(is.null(run_model()$nagegrp) | is.null(input$parameter_to_sweep) | input$parameter_to_sweep == 0) { 
+      return() 
+    } else {
+      sheet_names_for_sweep = run_model()$results$input.info    
+      baseline.parms.1d = run_model()$results$input.info$parms.1d  # data frame of 1d parameters
+      list.sweep = list() #        store results in list  ... 
+      df.sweep = c()      # ... or store results in data.frame
+      for(log.fudge.factor in seq(-0.5,0.5,0.25))
+      {
+        this.label = paste0(input$parameter_to_sweep, " multiplied by ", exp(log.fudge.factor))
+        parms.1d = baseline.parms.1d  # data frame of 1d parameters
+        parms.1d[[input$parameter_to_sweep]] = parms.1d[[input$parameter_to_sweep]] * exp(log.fudge.factor) # alter t_latency as per parameter sweep
+        sheet_names_for_sweep$parms.1d = parms.1d
+        this.result = SEIR.n.Age.Classes(input$file$datapath,sheet_names_for_sweep) 
+        list.sweep[[this.label]] = this.result$solution
+        this.result$solution$this.label = this.label
+        df.sweep = rbind(df.sweep,this.result$solution)
+      }
+      
+      # Rename this.label vector
+      colnames(df.sweep)[ncol(df.sweep)] <- "Sweep"
+      
+      # Organize output vectors alphabetically
+      df.sweep <- df.sweep %>% select(order(colnames(df.sweep))) %>% select(time, everything())
+      
+      # Rename the time vector
+      colnames(df.sweep)[1] <- "Time"
+      
+      # Position the Sweep vector after the Time vector
+      df.sweep <- cbind(Sweep = df.sweep$Sweep, df.sweep %>% select(-Sweep))
+      
+      return(df.sweep)
+    }
+  })
+  
   # Read sheets from uploaded Excel file
   get_inputs <- reactive({
     file_to_read <- input$file
@@ -394,7 +465,7 @@ server <- function(input, output) {
       source("SEIR.n.Age.Classes.R")
       
       sheet_names <- list(initial.conditions = "Initial conditions", parms.1d = "Parameters by Age" , parms.2d = "Parameters by Age x Age", model.flow = "Model Specs (lazy)", auxiliary.vars = "Intermediate calculations")
-      results <- SEIR.n.Age.Classes(file_to_read$datapath, sheet_names.lazy)
+      results <- SEIR.n.Age.Classes(file_to_read$datapath, sheet_names)
       
       # continue on below with listOut as before but should consider using results$solution
       listOut = results$solution 
@@ -419,7 +490,8 @@ server <- function(input, output) {
         varsc<-names(big_out)[grepl(p,names(big_out))]
       }
       
-      parameters_by_age <- as.data.frame.from.tbl(readxl::read_excel(file_to_read$datapath, sheet = sheet_names$parms.1d))
+      #parameters_by_age <- as.data.frame.from.tbl(readxl::read_excel(file_to_read$datapath, sheet = sheet_names$parms.1d))
+      parameters_by_age <- results$input.info$parms.1d
       
       # Compute other outcomes
       for(i in 1:nagegrp) {	
@@ -461,7 +533,7 @@ server <- function(input, output) {
       colnames(big_out)[1] <- "Time"
       
       # Return the model output
-      return(list(big_out = big_out, nagegrp = nagegrp, sheet_names = sheet_names, time_min = min(parameters_by_age$tmin), time_max = max(parameters_by_age$tmax), lookup = tibble(short = c("S", "L_tot", "I_tot", "R", "D", "IncI", "cumI", "Iss_hosp", "I_aq", "Isolat"), long = c("Susceptible compartment", "Latent compartment", "Infected compartment", "Recovered compartment", "Dead compartment", "Incidence", "Cumulative incidence", "Hospitalized", "Quarantined", "Isolated"))))
+      return(list(results = results, big_out = big_out, nagegrp = nagegrp, sheet_names = sheet_names, time_min = min(parameters_by_age$tmin), time_max = max(parameters_by_age$tmax), lookup = tibble(short = c("S", "L_tot", "I_tot", "R", "D", "IncI", "cumI", "Iss_hosp", "I_aq", "Isolat"), long = c("Susceptible compartment", "Latent compartment", "Infected compartment", "Recovered compartment", "Dead compartment", "Incidence", "Cumulative incidence", "Hospitalized", "Quarantined", "Isolated"))))
     }
   })
 }
