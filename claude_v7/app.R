@@ -31,8 +31,7 @@ ui <- fluidPage(
     ),
     mainPanel(
       tabsetPanel(
-        tabPanel("Plot", br(), plotlyOutput("compartment_plot") %>% withSpinner(color = "#337ab7")),
-        tabPanel("Summary statistics", br(), DTOutput("summary_statistics") %>% withSpinner(color = "#337ab7")),
+        tabPanel("Summary", htmlOutput("plot_title"), plotlyOutput("compartment_plot") %>% withSpinner(color = "#337ab7"), htmlOutput("summary_statistics_title"), DTOutput("summary_statistics"), br()),
         tabPanel("Model output", br(), DTOutput("model_output") %>% withSpinner(color = "#337ab7")),
         tabPanel("Initial conditions", br(), DTOutput("initial_conditions") %>% withSpinner(color = "#337ab7")),
         tabPanel("Parameters by age", br(), DTOutput("parameters_by_age") %>% withSpinner(color = "#337ab7")),
@@ -81,7 +80,7 @@ server <- function(input, output) {
         if(! is.na(start_date)) {
           df$Time <- as.character(start_date + df$Time)
         } 
-        df <- tibble(Description = names(df)[2], Min = as.integer(df[,2]), Day = df$Time)
+        df <- tibble(Description = names(df)[2], Min = as.integer(df[,2]), Day1 = df$Time)
       }
       
       # Function to compute max counts
@@ -91,7 +90,7 @@ server <- function(input, output) {
         if(! is.na(start_date)) {
           df$Time <- as.character(start_date + df$Time)
         } 
-        df <- tibble(Description = names(df)[2], Max = as.integer(df[,2]), Day = df$Time)
+        df <- tibble(Description = names(df)[2], Max = as.integer(df[,2]), Day2 = df$Time)
       }
       
       if (run_model()$nagegrp > 1){
@@ -115,10 +114,21 @@ server <- function(input, output) {
       }
       
       # Merge min and max data frames
-      df <- cbind(df1, df2 %>% select(-Description))
+      df <- cbind(Description = df1$Description, Rate = rep(NA, nrow(df1)), df1 %>% select(-Description), df2 %>% select(-Description))
       
       # Convert variable names to long form
       df$Description <- run_model()$lookup$long[match(gsub('[0-9]+', '', df$Description), run_model()$lookup$short)]
+      
+      # Compute attack rate
+      attack_rate <- df %>% filter(Description == "Susceptible compartment")
+      if(nrow(attack_rate) == 1) {
+        df <- df %>% add_row(Description = "Attack rate", "Rate" = as.integer((attack_rate$Max - attack_rate$Min) / attack_rate$Max * 100), "Min" = NA, "Day1" = NA, "Max" = NA, "Day2" = NA)
+      }
+      
+      # Order data frame alphabetically by description
+      df <- df[order(df$Description),]
+      
+      names(df)[c(4,6)] <- rep("Day", 2)
       
       return(list(df = df))
     }
@@ -247,6 +257,15 @@ server <- function(input, output) {
     )
   )
   
+  # Build other_outcome menu
+  output$other_outcome <- renderUI({
+    if(is.null(run_model()$nagegrp)) { 
+      return() 
+    } else {
+      checkboxGroupInput("other_outcome", label = "Select other outcomes", choices = list("Incidence (new cases per day)" = "IncI", "Cumulative incidence" = "cumI", "Hospitalized" = "Iss_hosp", "Quarantined" = "I_aq", "Isolated" = "Isolat"), selected = c(""))
+    }
+  })
+  
   # Build max_time menu based on the number of age groups detected in the uploaded Excel file
   output$max_time <- renderUI({
     if(is.null(run_model()$time_min) | is.null(run_model()$time_max)) { 
@@ -316,12 +335,12 @@ server <- function(input, output) {
     )
   )
   
-  # Build other_outcome menu
-  output$other_outcome <- renderUI({
+  # Render HTML title for the plot
+  output$plot_title <- renderText({
     if(is.null(run_model()$nagegrp)) { 
       return() 
     } else {
-      checkboxGroupInput("other_outcome", label = "Select other outcomes", choices = list("Incidence (new cases per day)" = "IncI", "Cumulative incidence" = "cumI", "Hospitalized" = "Iss_hosp", "Quarantined" = "I_aq", "Isolated" = "Isolat"), selected = c(""))
+      return(paste("<br>", "<h4>Plot</h4>", "<br>"))
     }
   })
   
@@ -355,6 +374,15 @@ server <- function(input, output) {
     )
   )
   
+  # Render HTML title for the summary statistics
+  output$summary_statistics_title <- renderText({
+    if(is.null(run_model()$nagegrp)) { 
+      return() 
+    } else {
+      return(paste("<br>", "<br>", "<br>", "<h4>Descriptives</h4>", "<br>"))
+    }
+  })
+  
   # Run SEIR model by age groups
   run_model <- reactive({
     # geneother_outcome bins based on input$bins from ui.R
@@ -369,7 +397,6 @@ server <- function(input, output) {
       results <- SEIR.n.Age.Classes(file_to_read$datapath, sheet_names.lazy)
       
       # continue on below with listOut as before but should consider using results$solution
-      #listOut = results$listOut.to.be.decomissioned  
       listOut = results$solution 
       nagegrp = ncol(results$input.info$initial.conditions) - 1
       
@@ -394,7 +421,7 @@ server <- function(input, output) {
       
       parameters_by_age <- as.data.frame.from.tbl(readxl::read_excel(file_to_read$datapath, sheet = sheet_names$parms.1d))
       
-      # Compute incidence	(number of new cases each day, over time [incidence])
+      # Compute other outcomes
       for(i in 1:nagegrp) {	
         v <- c()	
         I_tot <- unname(unlist(big_out %>% select(all_of(paste0("I_tot", i)))))	
@@ -405,7 +432,6 @@ server <- function(input, output) {
         Ism_iso <- unname(unlist(big_out %>% select(all_of(paste0("Ism_iso", ifelse(nagegrp > 1, i, ""))))))
         Iss_isohome <- unname(unlist(big_out %>% select(all_of(paste0("Iss_isohome", ifelse(nagegrp > 1, i, ""))))))
         
-        
         for(j in 1:nrow(big_out)) {	
           if(j == 1) {	
             v[j] <- I_tot[1]	
@@ -414,9 +440,17 @@ server <- function(input, output) {
             v[j] <- L_tot[j - 1] * sigma
           }	
         }	
+        
+        # Incidence	(number of new cases each day, over time [incidence])
         big_out[[paste0("IncI", ifelse(nagegrp > 1, i, ""))]] <- v
+        
+        # Cumulative incidence
         big_out[[paste0("cumI", ifelse(nagegrp > 1, i, ""))]] <- cumsum(v)
+        
+        # Quarantined
         big_out[[paste0("I_aq", ifelse(nagegrp > 1, i, ""))]] <- Lq + Iq_pres + Iaq_r
+        
+        # Isolated
         big_out[[paste0("Isolat", ifelse(nagegrp > 1, i, ""))]] <- Ism_iso + Iss_isohome
       } 
       
