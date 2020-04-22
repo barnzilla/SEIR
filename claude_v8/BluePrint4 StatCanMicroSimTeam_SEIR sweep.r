@@ -145,17 +145,17 @@ source("SEIR.n.Age.Classes.R")
  baseline.parms.2d = results.baseline$input.info$parms.2d  # data frame of 2d parameters
  
  # Define multipliers
- multipliers <- exp(seq(from = -0.5, to = 0.5, by = 0.15))
+ multipliers <- exp(seq(from = -0.5, to = 0.5, by = 1.25))
  
  # Apply multipliers to candidates
  # NOTE: this is the only place where you name the parameters
  # NOTE: use the parameter name as it appears in the relevant Excel spreadsheet
- candidates <- tibble(
+ candidates <- list(
    Cgg = multipliers,
    Cgq = multipliers,
    lambda = multipliers,
    beta = multipliers,
-   sigma = multipliers,
+   sigma = multipliers
    )
  
  # Compute all possible candidate by multiplier combinations
@@ -177,7 +177,7 @@ source("SEIR.n.Age.Classes.R")
        for(parameter in names(row)) {
           if(parameter %in% names(parms.1d)) {
              parms.1d[parms.1d$tmin %in% tmin.alter.scope, parameter] = subset(parms.1d,tmin %in% tmin.alter.scope)[[parameter]] * row[[parameter]]
-          } else if(parameter %in% names(parms.1d)) {
+          } else if(parameter %in% names(parms.2d)) {
              parms.2d[parms.2d$tmin %in% tmin.alter.scope, parameter] =subset(parms.2d,tmin %in% tmin.alter.scope)[[parameter]] * row[[parameter]]
           } else {
              # Parameter was not found in any parameter sheet
@@ -207,7 +207,7 @@ source("SEIR.n.Age.Classes.R")
              IncI[j] <- this.result$solution$L_tot[j - 1] * sigma
           }	
        }	
-       this.result$solution[["IncI"]] <- IncI
+       this.result$solution[["IncI"]] <- unlist(IncI)
        
        # Compute cumulative incidence
        this.result$solution[["cumI"]] <- cumsum(IncI)
@@ -243,7 +243,85 @@ source("SEIR.n.Age.Classes.R")
  
  
  # END 4) parameter sweep to match with old model ... let us consider old SC1 (lambda = 0.5, delta=0.3) 
- 
- 
- 
- 
+
+
+# Create a simulation grouping variable (factor)
+lookup <- tibble(long = unique(df.sweep$etiquette), short = 1:length(unique(df.sweep$etiquette)))
+df.sweep$Simulation <- factor(sapply(df.sweep$etiquette, function(x) lookup$short[x == lookup$long]))
+
+# Install plotly if not installed
+install_packages <- lapply("plotly", FUN = function(x) if(! require(x, character.only = TRUE)) install.packages(x))
+
+# Load plotly if not loaded
+load_packages <- lapply("plotly", require, character.only = TRUE)
+
+# Function to print line plot
+get_line_plot <- function(compartment) {
+   line_plot <- ggplot(df.sweep, aes(x = time, y = !!rlang::sym(compartment))) +
+      geom_line(aes(color = Simulation), size = 0.25) +
+      ggtitle(paste0("Distributions for ", compartment, ", by simulation")) +
+      xlab("Time (days)") +
+      ylab("Count (individuals)") +
+      theme_minimal() +
+      theme(
+         plot.title = element_text(size = 12),
+         axis.title.x = element_text(size = 12),
+         axis.title.y = element_text(size = 12),
+         legend.text = element_text(size = 12),
+         legend.title = element_blank()
+      )
+   ggplotly(line_plot)
+}
+
+# Print line plots
+get_line_plot(compartment = "S")
+get_line_plot(compartment = "L_tot")
+get_line_plot(compartment = "I_tot")
+get_line_plot(compartment = "R")
+get_line_plot(compartment = "D")
+get_line_plot(compartment = "IncI")
+get_line_plot(compartment = "cumI")
+get_line_plot(compartment = "Hosp")
+get_line_plot(compartment = "Quarant")
+get_line_plot(compartment = "Isolat")
+
+# Install the datatables package if not installed
+install_packages <- lapply("DT", FUN = function(x) if(! require(x, character.only = TRUE)) install.packages(x))
+
+# Load the datatables package if not loaded
+load_packages <- lapply("DT", require, character.only = TRUE)
+
+# Function to output counts by compartment and min or max
+get_crosstab <- function(compartment, func) {
+   # Create expressions
+   expression1 <- "df.sweep %>% group_by(Simulation) %>% filter(!!rlang::sym(compartment) == func(!!rlang::sym(compartment))) %>% select(Simulation, all_of(multiplier_vars), !!rlang::sym(compartment), time)"
+   expression2 <- "results$time == func(results$time)"
+   
+   # Replace func placeholder with function (e.g., min, max)
+   expression1 <- gsub("func", func, expression1)
+   expression2 <- gsub("func", func, expression2)
+   
+   # Find all variables that have .multiplier in their name
+   multiplier_vars <- names(df.sweep)[grepl(".multiplier", names(df.sweep))]
+   
+   # Compute max 
+   results <- eval(parse(text = expression1))
+   
+   # Compute max from max 
+   results <- results[eval(parse(text = expression2)),]
+   
+   # Print the resuls to a table
+   datatable(results)
+}
+
+# Print tables
+get_crosstab("S", func = "min")
+get_crosstab("L_tot", func = "max")
+get_crosstab("I_tot", func = "max")
+get_crosstab("R", func = "max")
+get_crosstab("D", func = "max")
+get_crosstab("IncI", func = "max")
+get_crosstab("cumI", func = "max")
+get_crosstab("Hosp", func = "max")
+get_crosstab("Quarant", func = "max")
+get_crosstab("Isolat", func = "max")
