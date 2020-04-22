@@ -36,6 +36,7 @@ load_packages <- lapply(package_names, require, character.only = TRUE)
 WDir <- "C:/Users/maiko/Downloads/SEIR_Model"             # working directory **** NO TRAILING /   akin to choose.dir()  ****
 WDir <- "C:/Users/Cloud/Desktop/WORK/PHAC/SEIR-Claude/v7" # working directory **** NO TRAILING /   akin to choose.dir()  ****
 WDir <- "C:/Users/Cloud/Desktop/WORK/PHAC/SEIR-PHAC snapsnots/Untitled_Message(From Antoinette April 20)" # working directory **** NO TRAILING /   akin to choose.dir()  ****
+WDir <- "c:/users/joel/google drive/github/seir/claude_v8" # working directory **** NO TRAILING /   akin to choose.dir()  ****
 #WDir <- choose.dir() # this does not generate a trailing slash or backslash
 cat(WDir)  # show folder chosen
 setwd(WDir)
@@ -143,55 +144,93 @@ source("SEIR.n.Age.Classes.R")
  baseline.parms.1d = results.baseline$input.info$parms.1d  # data frame of 1d parameters
  baseline.parms.2d = results.baseline$input.info$parms.2d  # data frame of 2d parameters
  
- Cgg.multiplier.candidates     = exp(seq(-0.5,0.5,1)   ) # from -0.5 to 0.5 by steps of 1
- Cgq.multiplier.candidates     = exp(seq(-0.5,0.5,1)   ) # from -0.5 to 0.5 by steps of 1
- Cgg.multiplier.candidates     = exp(seq(-0.5,0.5,0.25)) # from -0.5 to 0.5 by steps of 0.25
- Cgq.multiplier.candidates     = exp(seq(-0.5,0.5,0.25)) # from -0.5 to 0.5 by steps of 0.25
- lambda.multiplier.candidates  = exp( 0                ) # from -0.5 to 0.5 by steps of 0.25
-   beta.multiplier.candidates  = exp( 0                ) # from -0.5 to 0.5 by steps of 0.25
-  sigma.multiplier.candidates  = exp( 0                ) # from -0.5 to 0.5 by steps of 0.25
- etiquette = c("Cgg.multiplier=","Cgq.multiplier=","lambda.multiplier=","beta.multiplier=","sigma.multiplier=")
+ # Define multipliers
+ multipliers <- exp(seq(from = -0.5, to = 0.5, by = 0.15))
+ 
+ # Apply multipliers to candidates
+ # NOTE: this is the only place where you name the parameters
+ # NOTE: use the parameter name as it appears in the relevant Excel spreadsheet
+ candidates <- tibble(
+   Cgg = multipliers,
+   Cgq = multipliers,
+   lambda = multipliers,
+   beta = multipliers,
+   sigma = multipliers,
+   )
+ 
+ # Compute all possible candidate by multiplier combinations
+ multiplier_combos <- expand.grid(candidates, KEEP.OUT.ATTRS = FALSE)
  
  tmin.alter.scope = 40:55
  list.sweep = list() #        store results in list  ... 
  df.sweep = c()      # ... or store results in data.frame
- for(Cgg.multiplier in Cgg.multiplier.candidates)
-  for(Cgq.multiplier in Cgq.multiplier.candidates)
-   for(lambda.multiplier in lambda.multiplier.candidates)
-    for(beta.multiplier in beta.multiplier.candidates)
-     for(sigma.multiplier in sigma.multiplier.candidates)
-     {
-       this.label = paste(etiquette,c(Cgg.multiplier,Cgq.multiplier,lambda.multiplier,beta.multiplier,sigma.multiplier),collapse=" , ")
+ 
+ for(i in 1:nrow(multiplier_combos)) {
+      row <- multiplier_combos[i,]
+      this.label <- paste0(names(row), ".multiplier= ", row, collapse = " , ")
        cat("\n Doing",this.label)
-      # browser()
+       # browser()
        parms.1d = baseline.parms.1d  # data frame of 1d parameters to be altered
        parms.2d = baseline.parms.2d  # data frame of 2d parameters to be altered
        
-      #subset(parms.1d,tmin %in% tmin.alter.scope)$lambda = subset(parms.1d,tmin %in% tmin.alter.scope)$lambda * lambda.multiplier
-       parms.1d[parms.1d$tmin %in% tmin.alter.scope,]$lambda = subset(parms.1d,tmin %in% tmin.alter.scope)$lambda * lambda.multiplier
-       parms.1d[parms.1d$tmin %in% tmin.alter.scope,]$beta   = subset(parms.1d,tmin %in% tmin.alter.scope)$beta   *   beta.multiplier
-       parms.1d[parms.1d$tmin %in% tmin.alter.scope,]$sigma  = subset(parms.1d,tmin %in% tmin.alter.scope)$sigma  *  sigma.multiplier
-       
-       parms.2d[parms.2d$tmin %in% tmin.alter.scope,]$Cgg    = subset(parms.2d,tmin %in% tmin.alter.scope)$Cgg * Cgg.multiplier
-       parms.2d[parms.2d$tmin %in% tmin.alter.scope,]$Cgq    = subset(parms.2d,tmin %in% tmin.alter.scope)$Cgq * Cgq.multiplier
+       # Modify the parameter values at the specified tmin.alter.scope
+       for(parameter in names(row)) {
+          if(parameter %in% names(parms.1d)) {
+             parms.1d[parms.1d$tmin %in% tmin.alter.scope, parameter] = subset(parms.1d,tmin %in% tmin.alter.scope)[[parameter]] * row[[parameter]]
+          } else if(parameter %in% names(parms.1d)) {
+             parms.2d[parms.2d$tmin %in% tmin.alter.scope, parameter] =subset(parms.2d,tmin %in% tmin.alter.scope)[[parameter]] * row[[parameter]]
+          } else {
+             # Parameter was not found in any parameter sheet
+          }
+       }
        
        sheet_names_for_sweep$parms.1d = parms.1d # altered data.frame goes in sheet_names_for_sweep
        sheet_names_for_sweep$parms.2d = parms.2d # altered data.frame goes in sheet_names_for_sweep
        
        this.result = SEIR.n.Age.Classes(file_name,sheet_names_for_sweep) 
        
+       # Add other outcomes
+       # Compute L_tot
+       this.result$solution[["L_tot"]] <- this.result$solution %>% select_at(vars(starts_with("L"))) %>% rowSums()
+
+       # Compute I_tot
+       this.result$solution[["I_tot"]] <- this.result$solution %>% select_at(vars(starts_with("I"))) %>% rowSums()
+       
+       # Compute Incidence	(number of new cases each day, over time [incidence])
+       IncI <- c()
+       
+       for(j in 1:nrow(this.result$solution)) {	
+          if(j == 1) {	
+             IncI[j] <- this.result$solution$I_tot[1]	
+          } else {	
+             sigma <- parms.1d %>% filter(this.result$solution$time[j] > tmin & this.result$solution$time[j] <= tmax) %>% select(sigma)
+             IncI[j] <- this.result$solution$L_tot[j - 1] * sigma
+          }	
+       }	
+       this.result$solution[["IncI"]] <- IncI
+       
+       # Compute cumulative incidence
+       this.result$solution[["cumI"]] <- cumsum(IncI)
+       
+       # Compute Hospitalized
+       this.result$solution[["Hosp"]] <- this.result$solution$Iss_hosp
+       
+       # Compute Quarantined
+       this.result$solution[["Quarant"]] <- this.result$solution$Lq + this.result$solution$Iq_pres + this.result$solution$Iaq_r
+       
+       # Compute Isolated
+       this.result$solution[["Isolat"]] <- this.result$solution$Ism_iso + this.result$solution$Iss_isohome
+            
        list.sweep[[this.label]] = this.result$solution
        
-  
-       this.result$solution$etiquette = this.label
-       this.result$solution$Cgg.multiplier = Cgg.multiplier
-       this.result$solution$Cgq.multiplier = Cgq.multiplier
-       this.result$solution$lambda.multiplier = lambda.multiplier
-       this.result$solution$beta.multiplier   = beta.multiplier
-       this.result$solution$sigma.multiplier  = sigma.multiplier
+       # Add this.label and the parameter multpliers to the this.result$solution data frame
+       this.result$solution$etiquette <- this.label
+       for(parameter in names(row)) {
+          this.result$solution[[paste0(parameter, ".multiplier")]] <- row[[parameter]]
+       }
        
        df.sweep = rbind(df.sweep,this.result$solution)
-    }
+ }
  names(list.sweep)
  table(df.sweep$etiquette)
  table(df.sweep$Cgg.multiplier,df.sweep$Cgq.multiplier)
