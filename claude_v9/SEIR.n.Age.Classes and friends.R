@@ -576,31 +576,34 @@ SaveModelInExcel = function(input.info.list,file_name,map.names)
 
 
 
-
-
-
-
-
 try.various.parms.values = function(SEIR.object,parm.cloud.grid.specs,covid.targets,only.show.parms.to.try=FALSE)
 { 
   #parm.cloud.grid.specs is a list that should contain the following 7 things
-  # *  $hypercube.lower.bounds , $hypercube.upper.bounds
+  # *  $hypercube.lower.bounds , $hypercube.upper.bounds, $hypercube.apex.mode
   # *  $n.repeat.within.hypercube
-  # *  $tmin.alter.scope
+  # *  $LatinHypercubeSampling 
   # *  $racine
-  # *  $use.this.transformation
-  # *  $use.this.operation
+  # *  $tmin.alter.scope
+  # *  $backend.transformation
+  # *  $reference.alteration
  
   lower.bound      = parm.cloud.grid.specs$hypercube.lower.bounds 
   upper.bound      = parm.cloud.grid.specs$hypercube.upper.bounds
+  apex             = parm.cloud.grid.specs$hypercube.apex.mode  # may be NULL
   n.repeat         = parm.cloud.grid.specs$n.repeat.within.hypercube
   tmin.alter.scope = parm.cloud.grid.specs$tmin.alter.scope
 # racine           = parm.cloud.grid.specs$racine
-# use.this.transformation = parm.cloud.grid.specs$use.this.transformation
-# use.this.operation      = parm.cloud.grid.specs$use.this.operation
+# backend.transformation = parm.cloud.grid.specs$backend.transformation
+# reference.alteration      = parm.cloud.grid.specs$reference.alteration
   
+  set.seed(parm.cloud.grid.specs$racine)
   
-  flows.of.interest = gsub("solution.","",intersect(names(SEIR.object),c("solution.inflows","solution.outflows")))
+  operation_list = list(overwrite = function(current,new)         {0*current+new        } ,
+                        add       = function(current,increment  ) {  current+increment  } ,
+                        multiply  = function(current,mult_factor) {  current*mult_factor} )
+  operation_func = operation_list[[parm.cloud.grid.specs$reference.alteration]]
+  operation.label = c(overwrite=".overwrite",add=".add",multiply=".multiplier")[parm.cloud.grid.specs$reference.alteration]
+  
   
   # Compute all possible candidate by multiplier combinations
   #multiplier_combos <- expand.grid(candidates, KEEP.OUT.ATTRS = FALSE)
@@ -610,30 +613,51 @@ try.various.parms.values = function(SEIR.object,parm.cloud.grid.specs,covid.targ
     stop('dimension mismatch')
   if(any(colnames(lower.bound.expanded) != colnames(upper.bound.expanded) ))
     stop('column name mismatch')
+  
   lower.bound.expanded = lower.bound.expanded[rep(seq(nrow(lower.bound.expanded)) , n.repeat ),]
   upper.bound.expanded = upper.bound.expanded[rep(seq(nrow(upper.bound.expanded)) , n.repeat ),]
+  lower.bound.expanded = data.matrix(lower.bound.expanded)
+  upper.bound.expanded = data.matrix(upper.bound.expanded)
+  if(!is.null(apex))
+  {
+    apex.expanded = expand.grid(apex, KEEP.OUT.ATTRS = FALSE)
+    apex.expanded = apex.expanded[rep(seq(nrow(apex.expanded)) , n.repeat ),]
+    apex.expanded = data.matrix(apex.expanded)
+  }
+
+  if(parm.cloud.grid.specs$LatinHypercubeSampling)
+    random.vect= c( lhs::randomLHS( nrow(upper.bound.expanded),ncol(upper.bound.expanded) ) )
+  else
+    random.vect= runif(prod(dim(upper.bound.expanded)))
   
-  parms.to.try = (upper.bound.expanded - lower.bound.expanded) * runif(prod(dim(upper.bound.expanded)))
-  parms.to.try = lower.bound.expanded + parms.to.try
-  parms.to.try = parm.cloud.grid.specs$use.this.transformation(parms.to.try)
-# dim(parms.to.try) # check size of sweep you are about to do  (number of scenarios , number of parameters)
+  # parms.to.try = (upper.bound.expanded - lower.bound.expanded) *  random.vect
+  # parms.to.try = lower.bound.expanded + parms.to.try
+  if(is.null(apex))
+    parms.to.try = qunif    (random.vect,lower.bound.expanded,upper.bound.expanded)
+  else
+    parms.to.try = qtriangle(random.vect,lower.bound.expanded,upper.bound.expanded,apex.expanded)
+    
+  parms.to.try = 0*lower.bound.expanded + parms.to.try
+  parms.to.try = parm.cloud.grid.specs$backend.transformation(parms.to.try)
+  
+  parms.to.try.verbose = as.data.frame(parms.to.try)
+  colnames(parms.to.try.verbose) = paste0(colnames(parms.to.try),operation.label)
+  rownames(parms.to.try.verbose) = c()
+  
   if(only.show.parms.to.try)
-    return (list(parms.to.try=parms.to.try))
+    return (list(parms.to.try=parms.to.try.verbose))
   
-  operation_list = list(overwrite = function(current,new)         {0*current+new        } ,
-                        add       = function(current,increment  ) {  current+increment  } ,
-                        multiply  = function(current,mult_factor) {  current*mult_factor} )
-  operation_func = operation_list[[parm.cloud.grid.specs$use.this.operation]]
-  operation.label = c(overwrite="",add=".add",multiply=".multiplier")[parm.cloud.grid.specs$use.this.operation]
-  
-  # baseline/template
- 
+
+  # Recover some info from baseline/template (i.e. SEIR.object)
   
   sheet_names_for_sweep = SEIR.object$input.info           # Can use either of those two lines ... in theory (not tested)
   sheet_names_for_sweep = SEIR.object$input.info.verbatim  # Can use either of those two lines ... in theory (not tested)
   
   baseline.parms.1d = SEIR.object$input.info$parms.1d  # data frame of 1d parameters
   baseline.parms.2d = SEIR.object$input.info$parms.2d  # data frame of 2d parameters
+  
+  flows.of.interest = gsub("solution.","",intersect(names(SEIR.object),c("solution.inflows","solution.outflows")))
+  
   
   list.sweep = list() #        store results in list  ... 
   df.sweep = c()      # ... or store results in data.frame
@@ -642,8 +666,7 @@ try.various.parms.values = function(SEIR.object,parm.cloud.grid.specs,covid.targ
   outcomes.summary.df = c()
   ever.been.here.info= list(ever.been.here.from.inflows=0         , ever.been.here.from.outflows=0         ) # numeric   --> do not bypass
   ever.been.here.info= list(ever.been.here.from.inflows="Not done", ever.been.here.from.outflows="Not done") # character -->        bypass
-  set.seed(parm.cloud.grid.specs$racine)
-  
+
   for(i in 1:nrow(lower.bound.expanded)) {
     row <-  parms.to.try[i,] 
     #this.label <- paste0(names(row),       ".multiplier= ", row, collapse = " , ")
@@ -705,11 +728,50 @@ try.various.parms.values = function(SEIR.object,parm.cloud.grid.specs,covid.targ
   }
   rownames(outcomes.summary.df) = c()
   
-  list(parms.to.try=parms.to.try, 
-       outcomes.summary.df=outcomes.summary.df,
-       df,df.sweep=df.sweep,
+  list(parm.cloud.grid.specs = parm.cloud.grid.specs,
+       parms.to.try = parms.to.try.verbose, 
+       outcomes.summary.df = outcomes.summary.df,
+       df.sweep = df.sweep,
        # list.sweep.ever.from.inflows =list.sweep.ever.from.inflows,
        # list.sweep.ever.from.outflows=list.sweep.ever.from.outflows,
        list.sweep=list.sweep) 
 }
 
+  
+Assess.covariate.importance = function (don,X,Y,method)
+{
+  #  if(method == "ANOVA SS type ???")
+  #  if(method == "Stepwise")  
+  #  if(method == "Regression tree")  
+  #  if(method == "Et cetera...")  
+
+  if(method %in% c( "negative-log-p-value","t-test","pearson-partial-correlation-fast") )
+  {
+    formule = eval(parse(text= paste(Y,"~",paste(X,collapse="+")) ))
+    reg = summary(lm(formule,data=don))
+    if(method =="negative-log-p-value" )
+      result = -log(reg$coefficients[-1,"Pr(>|t|)"] )
+    else
+    { # "t-test" or "pearson-partial-correlation-fast"
+      result = reg$coefficients[-1,"t value"] # result for "t-test" ... "PPCF" needs more work below
+      if(method == "pearson-partial-correlation-fast")
+        result = result / sqrt(reg$df[2] + result**2) #  "pearson-partial-correlation-fast" aka "PPCF" 
+    }  
+  }
+    
+  if(grepl("-partial-correlation-slow",method ) )
+  {
+    cor.method = sub("-partial-correlation-slow","",method)
+    result = c()
+    for(this.X in X)
+    {
+      other.covariates = paste(setdiff(X,this.X),collapse="+") 
+      formule.Y      = eval(parse(text= paste(Y     ,"~",other.covariates) ))
+      formule.this.X = eval(parse(text= paste(this.X,"~",other.covariates) ))
+      result = c(result,cor(lm(formule.Y,data=don)$residuals,lm(formule.this.X,data=don)$residuals,method=cor.method))
+    }
+    names(result) = X 
+  }   
+    
+  result
+}
