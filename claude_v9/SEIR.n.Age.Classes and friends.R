@@ -1,5 +1,5 @@
 
-SEIR.n.Age.Classes = function(file.name, sheets.names, differential.eqns.func=NULL)
+SEIR.n.Age.Classes = function(file.name, sheets.names, differential.eqns.func=NULL , also.get.flows=NULL)
 {
   #sheets.names is list(parms.1d,  parms.2d,  initial.conditions,  model.flow,  auxiliary.vars)
   
@@ -23,7 +23,17 @@ SEIR.n.Age.Classes = function(file.name, sheets.names, differential.eqns.func=NU
   if(!is.data.frame(input_stuff)) 
     input_stuff  <- as.data.frame.from.tbl( readxl::read_excel(file.name, sheet = input_stuff) ) # initial values/conditions
   
+  raw.init.conditions = input_stuff # keep snapshot for output.  input_stuff may be altered later
+  
   nagegrp <- length(unique(time_stuff$agegrp))        # number of age groups
+  nagegrp = ncol(raw.init.conditions) - 1             # number of age groups
+  agegrp.suffix = ""
+  if(nagegrp > 1)
+    agegrp.suffix = 1:nagegrp
+
+  raw.compartments =   raw.init.conditions$NAME # e.g.  S D L
+  raw.compartments.age = c ( t( outer( raw.compartments,agegrp.suffix,paste0) ) ) # e.g. S1 S2 S3 S4 S5 D1 D2 ...
+  
   
   nrow_   <- dim(time_stuff)[1]/nagegrp
   
@@ -34,27 +44,26 @@ SEIR.n.Age.Classes = function(file.name, sheets.names, differential.eqns.func=NU
   time_stuff_m <- arrange(time_stuff_m, tmin, cagegrp, ragegrp) # sort by tmin cagegrp  ragegrp
   time_stuff_m <- time_stuff_m %>%
     mutate(isim = rep(1:nrow_, each = nagegrp*nagegrp))
+ 
   #===================================================================
-  # Initial values (components)
+  # Build function post.processing
   #===================================================================
-  #initial values
-  input_stuff_age_columns = setdiff(colnames(input_stuff), "NAME")
-  init_list <- list()
-  for(k in input_stuff$NAME){
-    init_list[[k]] <- as.matrix( subset(input_stuff, NAME == k)[,input_stuff_age_columns] )
-  }
+  
+  #LATER
+  #post.processing.code <- as.data.frame.from.tbl( readxl::read_excel(file.name, sheet = sheets.names$post.processing ) )  
+ 
   
   #===================================================================
   # Build function eval.differential.eqns.func (if not provided)
   #===================================================================
   model_flows_tmp = auxiliary.vars = "Not used since was argument differential.eqns.func was provided"
   eval.differential.eqns.func = differential.eqns.func
-  if(is.null(eval.differential.eqns.func))
+  flows.requested = !is.null(also.get.flows) && any(also.get.flows %in% c("inflows","outflows"))
+  if(flows.requested || is.null(eval.differential.eqns.func))
   {
     model_flows_tmp = sheets.names$model.flow
     auxiliary.vars  = sheets.names$auxiliary.vars
  
-    
     if(!is.data.frame(model_flows_tmp))
       model_flows_tmp  <- as.data.frame.from.tbl( readxl::read_excel(file.name, sheet = model_flows_tmp) )  # arrows in flowchart
     
@@ -64,6 +73,32 @@ SEIR.n.Age.Classes = function(file.name, sheets.names, differential.eqns.func=NU
     model_flows_tmp = subset( model_flows_tmp,!is.na(expression) & activation ==1)
     model_flows = model_flows_tmp     # keep model_flows_tmp for output. Work on model_flows from this point on
     
+   
+    # BEGIN update model_flows and input_stuff as per requested flows (if any) 
+    
+    init.cond.numeric.vars = setdiff(colnames(input_stuff),"NAME")
+    silly.inflow.model = silly.outflow.model = list()
+    
+   #if(!is.null(flows.prefix$inflows))
+    if(any(also.get.flows == "inflows"))
+      silly.inflow.model = get.silly.model.chunk(model_flows, input_stuff, init.cond.numeric.vars, "inflow" ,  "SlackBoxForInflows", "inflows.")
+  
+   #if(!is.null(flows.prefix$outflows))
+    if(any(also.get.flows == "outflows"))
+      silly.outflow.model= get.silly.model.chunk(model_flows, input_stuff, init.cond.numeric.vars, "outflow", "outflows.", "SlackBoxForOutflows")
+   
+    model_flows = rbind(model_flows, silly.inflow.model$model, silly.outflow.model$model)
+    input_stuff = rbind(input_stuff, silly.inflow.model$init , silly.outflow.model$init )
+    
+    # END   update model_flows and input_stuff as per requested flows (if any) 
+    
+    
+    # Get init_list.  Same content as input_stuff but in a list format
+    init_list <- list()
+    for(k in input_stuff$NAME)
+      init_list[[k]] <- as.matrix( subset(input_stuff, NAME == k)[,init.cond.numeric.vars] )
+    
+   
     # BEGIN Build character vector differential.eqns.char
     model_flows$multiplier = model_flows$From
     
@@ -72,6 +107,8 @@ SEIR.n.Age.Classes = function(file.name, sheets.names, differential.eqns.func=NU
       stop("\nstyle (lazy or not) must be specified for all transitions")
     if(diff(lazy.range)>0 || !(lazy.range[1] %in% c(0,1)) )  # may be relaxed later
       stop("\nstyle (lazy or not) should be all zeros or all ones")
+    if(flows.requested && lazy.range[1]==1)
+      stop("\nLazy style should not be used when inflows and/or outflows are requested.")  # may be relaxed later
     
     if(lazy.range[1] == 0)  # not lazy
       model_flows$multiplier = NA
@@ -104,11 +141,11 @@ SEIR.n.Age.Classes = function(file.name, sheets.names, differential.eqns.func=NU
     
     # END Build character vector differential.eqns.char
     
-    
+
     # BEGIN Build function eval.differential.eqns.func
     
     auxiliary.vars.assignment = paste(auxiliary.vars$variable,"=",auxiliary.vars$expression)
-    compartments =   names(init_list) # e.g.  S D L
+    compartments =   input_stuff$NAME # e.g.  S D L
     compartments.age = c ( t( outer( compartments,seq(nagegrp),paste0) ) ) # e.g. S1 S2 S3 S4 S5 D1 D2 ...
     out.char      = paste0("out=c(", paste0("derivative.", paste(compartments    , collapse=", derivative.")),")")
     names.out.char= paste0("out=c(", paste0("derivative.", paste(compartments.age, collapse=",derivative." )),")") 
@@ -257,9 +294,9 @@ SEIR.n.Age.Classes = function(file.name, sheets.names, differential.eqns.func=NU
     init <- out_for_init$value
     names(init) <- out_for_init$name     
     
-    rowns <- names(select(out,-c(time)))
-    out <- out %>%
-      mutate(N_tot = rowSums(.[rowns]))  # Total number of individuals 
+ #   rowns <- names(select(out,-c(time)))
+ #   out <- out %>%
+ #     mutate(N_tot = rowSums(.[rowns]))  # Total number of individuals 
     
     
     #updating the initial values  
@@ -267,18 +304,86 @@ SEIR.n.Age.Classes = function(file.name, sheets.names, differential.eqns.func=NU
       init_list[[k]][1:nagegrp] <- init[seq(nagegrp*(k-1)+1,nagegrp*k)] 
     }
     
-    
+   if(i < nSim)
+      out = out[-nrow(out),]
     # Add outputs to the list
-    df.out = rbind(df.out,out[-nrow(out),])
+    df.out = rbind(df.out,out)
     listOut[[i]] <- out
   } #end for(i in seq(1, nSim, 1))
-  resultat = list( solution=df.out, differential.eqns.func = eval.differential.eqns.func ) # ,listOut.to.be.decomissioned = listOut 
-  resultat$input.info = list(parms.1d=time_stuff, parms.2d=time_stuff_m, initial.conditions=input_stuff,
+  
+  resultat = list( differential.eqns.func = eval.differential.eqns.func ) 
+  
+  #BEGIN add on $solution.inflows, $solution.outflows and $solution to resultat
+  solution = df.out
+  if(any(also.get.flows == "inflows"))
+  {
+    var.names = c ( t( outer( paste0("inflows.",raw.compartments),agegrp.suffix,paste0) ) )
+    resultat$solution.inflows  = solution[,c("time",var.names)]
+    colnames( resultat$solution.inflows) = c("time",raw.compartments.age)
+  }
+  if(any(also.get.flows == "outflows"))
+  {
+    var.names = c ( t( outer( paste0("outflows.",raw.compartments),agegrp.suffix,paste0) ) )
+    resultat$solution.outflows  = solution[,c("time",var.names)]
+    colnames( resultat$solution.outflows) = c("time",raw.compartments.age)
+  }  
+  resultat$solution = solution[,c("time",raw.compartments.age)]  
+  #END add on $solution.inflows, $solution.outflows and $solution to resultat
+  
+  resultat$input.info = list(parms.1d=time_stuff, parms.2d=time_stuff_m, initial.conditions=raw.init.conditions,
                              auxiliary.vars=auxiliary.vars,model.flow=model_flows_tmp)
   resultat$input.info.verbatim = input.info.verbatim
   resultat
 } #end of SEIR.n.Age.Classes function
 
+
+get.silly.model.chunk = function(model_flows, init.cond, init.cond.numeric.vars, which.flow, NewFrom, NewTo)
+{
+  #browser()
+  inflow.orphans = outflow.orphans = c()
+  silly_model = model_flows  
+  if(which.flow %in% c("inflow","inflows"))
+  {
+    silly_model$To   = paste0(NewTo,silly_model$To)
+    silly_model$From = NewFrom
+    init.prefix      = NewTo
+    init.slack.name  = NewFrom
+    inflow.orphans   = setdiff(init.cond$NAME,unique(model_flows$To))
+  }
+  if(which.flow %in% c("outflow","outflows"))
+  {
+    silly_model$From = paste0(NewFrom,silly_model$From)
+    silly_model$To   = NewTo
+    init.prefix      = NewFrom
+    init.slack.name  = NewTo
+    outflow.orphans  = setdiff(init.cond$NAME,unique(model_flows$From))
+  }
+  
+  silly_init  = init.cond
+  silly_init$NAME  = paste0(init.prefix,silly_init$NAME)
+  silly_init[,init.cond.numeric.vars] = 0
+  init.slack = silly_init[1,]
+  init.slack$NAME = init.slack.name
+  silly_init = rbind(silly_init,init.slack)
+  
+  #BEGIN handle the orphans
+  model.inflow.orphans = model.outflow.orphans = c()
+  if(length(inflow.orphans) > 0)
+  {
+    model.inflow.orphans = silly_model[rep(1,length(inflow.orphans)),]
+    model.inflow.orphans$To = paste0(NewTo,inflow.orphans)
+    model.inflow.orphans$expression = "0"
+  }
+  if(length(outflow.orphans) > 0)
+  {
+    model.outflow.orphans = silly_model[rep(1,length(outflow.orphans)),]
+    model.outflow.orphans$From = paste0(NewFrom,outflow.orphans)
+    model.outflow.orphans$expression = "0"
+  }
+  #END handle the orphans
+  
+  list(init=silly_init , model = rbind(silly_model,model.inflow.orphans,model.outflow.orphans) )
+}
 
 smooch.parms.df.into.list = function(df.parms.1d,df.parms.2d,these.are.not.parms)
 { # takes 1d and 2d parms in data.frame format and makes a list.
@@ -340,9 +445,271 @@ Add.Other.Outcomes = function(solution.df,parms.1d,definition.list)
   solution.df
 }
 
-Outcomes.Summary = function(solution.df)  # content to be expanded
+Outcomes.Summary = function(solution.df,targets)  # content to be expanded
 {
   maxI = max(solution.df$I_tot)
   
-  data.frame(maxI=maxI,maxI.time = subset(solution.df,I_tot==maxI)$time)
+  sommaire=data.frame(maxI=maxI,maxI.time = subset(solution.df,I_tot==maxI)$time)
+  sommaire$cumI.75days = subset(solution.df,time==75)$cumI
+  sommaire$total.deaths = max(solution.df$D)
+  
+  
+  sommaire$maxInc     <- max(solution.df$IncI)
+  sommaire$maxItot    <- max(solution.df$I_tot)
+  sommaire$daymaxInc  <- subset(solution.df , IncI  == sommaire$maxInc  )$time 
+  sommaire$daymaxItot <- subset(solution.df , I_tot == sommaire$maxItot )$time 
+  
+  sommaire$AR <- (max(solution.df$S) - min(solution.df$S))/max(solution.df$S)*100
+  
+  
+  sommaire$epilength1<-min( solution.df$time[solution.df$cumI==max(solution.df$cumI)] )
+  
+  IncIbelow1 = solution.df$IncI <1 & solution.df$time > sommaire$daymaxInc
+  sommaire$epilength2 <- which.max(IncIbelow1)[1]-1 # For a logical vector x with both FALSE and TRUE values, which.max(x) return the index of the first TRUE
+  
+  
+  if(length(setdiff( colnames(targets$donnees) , colnames(solution.df)  ) )>0 )
+    stop("\nAll variables in targets$donnees should be in solution.df")
+  
+  Ynames = setdiff(colnames(targets$donnees),"time")
+  
+  for(k in seq(nrow(targets$time.ranges)))
+  {
+    time.span = targets$time.ranges[k,]
+    time.span.char = paste(time.span,collapse="-")
+    model = subset(solution.df     , time.span$lower.bound <= time & time <=  time.span$upper.bound)[,Ynames,drop=F]
+    dat   = subset(targets$donnees , time.span$lower.bound <= time & time <=  time.span$upper.bound)[,Ynames,drop=F]
+    erreur = apply(abs(model-dat),2,sum)
+    names(erreur) = paste("GOF",names(erreur),"days",time.span.char) # e.g. "GOF cumI days 60-69" "GOF D days 60-69"
+    sommaire = cbind(sommaire, t(as.data.frame(erreur)) )
+  } 
+  
+  sommaire
 }
+
+
+ever.been.here = function(SEIR.object)  
+{
+  n_agegrp = ncol(SEIR.object$input.info$initial.conditions) - 1 # number of age groups
+  agegrp.suffix = ""
+  if(n_agegrp > 1)
+    agegrp.suffix = 1:n_agegrp
+  
+ # SEIR.object = SEIR.object.5age.betavec.not.lazy
+  range(diff(SEIR.object$solution$time)) # check that times are in increments of 1 (feature implicitly used below)
+  differential.eqns.func=SEIR.object$differential.eqns.func
+  
+  these.are.not.parms = c("tmin",     "tmax" ,  "agegrp", "isim" ) # actaully want to keep "ragegrp",  "cagegrp"
+  inflows  = c()
+  outflows = c()
+  for(tt in SEIR.object$solution$time) # [1:4]
+  {
+    cat("\nicitte ",tt)
+    #BEGIN get list.parm.1d.2d  (all parameters stored in a list  )
+    df.parm.1d = SEIR.object$input.info$parms.1d
+    df.parm.2d = SEIR.object$input.info$parms.2d
+    df.parm.1d = subset(df.parm.1d ,overlap.length(tt,tt+1,df.parm.1d$tmin,df.parm.1d$tmax) > 0 )
+    df.parm.2d = subset(df.parm.2d ,overlap.length(tt,tt+1,df.parm.2d$tmin,df.parm.2d$tmax) > 0 )
+    list.parm.1d.2d = smooch.parms.df.into.list(df.parm.1d,df.parm.2d,these.are.not.parms)
+    #END get list.parm.1d.2d  (all parameters stored in a list  )
+    
+   # browser()
+    #BEGIN list.compartments  ... will contain vectors D, R, S, ... at time tt
+    list.compartments = list() # will contain vectors D, R, S, ....
+    mat1row.compartments = data.matrix(subset(SEIR.object$solution,time == tt))
+    for(k in SEIR.object$input.info$initial.conditions$NAME)
+      list.compartments[[k]] = mat1row.compartments[1,paste0(k,agegrp.suffix)]
+    #END list.compartments  ... will contain vectors D, R, S, ... at time tt
+    # browser()
+    inflows  = rbind(inflows  , differential.eqns.func(list.compartments,list.parm.1d.2d,flow.multiplier =list(inflow = 1,outflow=0))[[1]] )
+    outflows = rbind(outflows , differential.eqns.func(list.compartments,list.parm.1d.2d,flow.multiplier =list(inflow = 0,outflow=1))[[1]] )
+  }
+  browser()
+  colnames(inflows ) = gsub("derivative.","",colnames(inflows ))
+  colnames(outflows) = gsub("derivative.","",colnames(outflows))
+  solution.lean = SEIR.object$solution[,setdiff(names(SEIR.object$solution),c("time","N_tot")) ]
+  
+  
+  ever.been.here.from.inflows = rbind(solution.lean[1,],inflows[-nrow(inflows),])
+  ever.been.here.from.inflows = as.data.frame( apply(ever.been.here.from.inflows,2,cumsum)  )
+  ever.been.here.from.inflows$time = SEIR.object$solution$time
+  
+  ever.been.here.from.outflows = rbind(0*solution.lean[1,],outflows[-nrow(outflows),])
+  ever.been.here.from.outflows = as.data.frame( apply(ever.been.here.from.outflows,2,cumsum)  )
+  ever.been.here.from.outflows = ever.been.here.from.outflows[,colnames(solution.lean)] + solution.lean
+  ever.been.here.from.outflows$time = SEIR.object$solution$time
+  
+  list(ever.been.here.from.inflows=ever.been.here.from.inflows, ever.been.here.from.outflows=ever.been.here.from.outflows)
+}
+
+if(FALSE)
+{
+  # Compare 1 age group results with 5 age groups
+  results.1age  = "provide some object"          
+  results.5ages = "provide some object"  
+  
+  mat.range = c()
+  vars.to.check = setdiff(colnames(results.1age$solution),c( "time","N_tot" ))
+  for(this.box in vars.to.check )
+  {
+    somme = apply(results.5ages$solution[,paste0(this.box,1:5)],1,sum)
+    actual.diff = results.1age$solution[,this.box] - somme
+    rel.diff = actual.diff /( 1e-9 +  pmax(results.1age$solution[,this.box] , somme) )
+    this.range = c(range(rel.diff ) , range(actual.diff))
+    mat.range = rbind(mat.range,this.range)
+    cat("\n",this.box,"\t", this.range)   
+  }
+  rownames(mat.range) = vars.to.check
+  matplot(seq(nrow(mat.range)),mat.range[,1:2],main='Relative differences') 
+  matplot(seq(nrow(mat.range)),mat.range[,3:4],main='Actual   differences') 
+}
+
+SaveModelInExcel = function(input.info.list,file_name,map.names)
+{  # map.names is named vector saying map.names["parms.1d"  ] =  "Parameters by Age"
+ # map.names = unlist(sheet_names) # allows to map "parms.1d" into "Parameters by Age" for instance
+  names(input.info.list) = map.names[names(input.info.list)] # $parms.1d is now $'Parameters by Age'
+  openxlsx::write.xlsx(input.info.list, file_name, colWidths = c(NA, "auto", "auto"))
+
+}
+
+
+
+
+
+
+
+
+
+
+try.various.parms.values = function(SEIR.object,parm.cloud.grid.specs,covid.targets,only.show.parms.to.try=FALSE)
+{ 
+  #parm.cloud.grid.specs is a list that should contain the following 7 things
+  # *  $hypercube.lower.bounds , $hypercube.upper.bounds
+  # *  $n.repeat.within.hypercube
+  # *  $tmin.alter.scope
+  # *  $racine
+  # *  $use.this.transformation
+  # *  $use.this.operation
+ 
+  lower.bound      = parm.cloud.grid.specs$hypercube.lower.bounds 
+  upper.bound      = parm.cloud.grid.specs$hypercube.upper.bounds
+  n.repeat         = parm.cloud.grid.specs$n.repeat.within.hypercube
+  tmin.alter.scope = parm.cloud.grid.specs$tmin.alter.scope
+# racine           = parm.cloud.grid.specs$racine
+# use.this.transformation = parm.cloud.grid.specs$use.this.transformation
+# use.this.operation      = parm.cloud.grid.specs$use.this.operation
+  
+  
+  flows.of.interest = gsub("solution.","",intersect(names(SEIR.object),c("solution.inflows","solution.outflows")))
+  
+  # Compute all possible candidate by multiplier combinations
+  #multiplier_combos <- expand.grid(candidates, KEEP.OUT.ATTRS = FALSE)
+  lower.bound.expanded = expand.grid(lower.bound, KEEP.OUT.ATTRS = FALSE)
+  upper.bound.expanded = expand.grid(upper.bound, KEEP.OUT.ATTRS = FALSE)
+  if(any(dim(lower.bound.expanded) != dim(upper.bound.expanded) ))
+    stop('dimension mismatch')
+  if(any(colnames(lower.bound.expanded) != colnames(upper.bound.expanded) ))
+    stop('column name mismatch')
+  lower.bound.expanded = lower.bound.expanded[rep(seq(nrow(lower.bound.expanded)) , n.repeat ),]
+  upper.bound.expanded = upper.bound.expanded[rep(seq(nrow(upper.bound.expanded)) , n.repeat ),]
+  
+  parms.to.try = (upper.bound.expanded - lower.bound.expanded) * runif(prod(dim(upper.bound.expanded)))
+  parms.to.try = lower.bound.expanded + parms.to.try
+  parms.to.try = parm.cloud.grid.specs$use.this.transformation(parms.to.try)
+# dim(parms.to.try) # check size of sweep you are about to do  (number of scenarios , number of parameters)
+  if(only.show.parms.to.try)
+    return (list(parms.to.try=parms.to.try))
+  
+  operation_list = list(overwrite = function(current,new)         {0*current+new        } ,
+                        add       = function(current,increment  ) {  current+increment  } ,
+                        multiply  = function(current,mult_factor) {  current*mult_factor} )
+  operation_func = operation_list[[parm.cloud.grid.specs$use.this.operation]]
+  operation.label = c(overwrite="",add=".add",multiply=".multiplier")[parm.cloud.grid.specs$use.this.operation]
+  
+  # baseline/template
+ 
+  
+  sheet_names_for_sweep = SEIR.object$input.info           # Can use either of those two lines ... in theory (not tested)
+  sheet_names_for_sweep = SEIR.object$input.info.verbatim  # Can use either of those two lines ... in theory (not tested)
+  
+  baseline.parms.1d = SEIR.object$input.info$parms.1d  # data frame of 1d parameters
+  baseline.parms.2d = SEIR.object$input.info$parms.2d  # data frame of 2d parameters
+  
+  list.sweep = list() #        store results in list  ... 
+  df.sweep = c()      # ... or store results in data.frame
+  list.sweep.ever.from.inflows = list.sweep.ever.from.outflows = list.sweep
+  df.sweep.ever.from.inflows =   df.sweep.ever.from.outflows =   df.sweep  # later maybe
+  outcomes.summary.df = c()
+  ever.been.here.info= list(ever.been.here.from.inflows=0         , ever.been.here.from.outflows=0         ) # numeric   --> do not bypass
+  ever.been.here.info= list(ever.been.here.from.inflows="Not done", ever.been.here.from.outflows="Not done") # character -->        bypass
+  set.seed(parm.cloud.grid.specs$racine)
+  
+  for(i in 1:nrow(lower.bound.expanded)) {
+    row <-  parms.to.try[i,] 
+    #this.label <- paste0(names(row),       ".multiplier= ", row, collapse = " , ")
+    this.label <- paste0(names(row), operation.label, "= ", row, collapse = " , ")
+    
+    
+    cat("\n Doing",i,"of",nrow(parms.to.try),"simulations :",this.label)
+    
+    parms.1d = baseline.parms.1d  # data frame of 1d parameters to be altered
+    parms.2d = baseline.parms.2d  # data frame of 2d parameters to be altered
+    
+    # Modify the parameter values at the specified tmin.alter.scope
+    for(parameter in names(row)) {
+      if(parameter %in% names(parms.1d)) {
+        parms.1d[parms.1d$tmin %in% tmin.alter.scope, parameter] = operation_func(subset(parms.1d,tmin %in% tmin.alter.scope)[[parameter]] , row[[parameter]] )
+      } else if(parameter %in% names(parms.2d)) {
+        parms.2d[parms.2d$tmin %in% tmin.alter.scope, parameter] = operation_func(subset(parms.2d,tmin %in% tmin.alter.scope)[[parameter]] , row[[parameter]] )
+      } else {
+        stop(paste(parameter,"was not found in any parameter sheet"))# Parameter was not found in any parameter sheet
+      }
+    }
+    
+    sheet_names_for_sweep$parms.1d = parms.1d # altered data.frame goes in sheet_names_for_sweep
+    sheet_names_for_sweep$parms.2d = parms.2d # altered data.frame goes in sheet_names_for_sweep
+    
+    this.result = SEIR.n.Age.Classes(file_name,sheet_names_for_sweep,also.get.flows=flows.of.interest) 
+    
+    # Add on other time series like cumulative incidence
+    this.result$solution = Add.Other.Outcomes (this.result$solution,parms.1d,"third argument currently inoperant")
+    
+    # Add on univariate stuff like maxI or maxI.time to outcomes.summary.df
+    summary.template = data.frame(etiquette = this.label)
+    for(parameter in names(row)) 
+      summary.template[[paste0(parameter, operation.label)]] <- row[[parameter]]
+    summary.chunk = Outcomes.Summary(this.result$solution,covid.targets)
+    summary.chunk = cbind(summary.template,summary.chunk)
+    # summary.chunk$etiquette = this.label # not sure if this is useful to keep
+    # for(parameter in names(row)) 
+    #  summary.chunk[[paste0(parameter, operation.label)]] <- row[[parameter]]
+    
+    outcomes.summary.df = rbind(outcomes.summary.df,summary.chunk)
+    
+    # Get ever.been.here info
+    if(!is.character(ever.been.here.info$ever.been.here.from.inflows))
+      ever.been.here.info = ever.been.here(this.result) # this.result has been altered above but should not cause harm
+    
+    #Update list.sweep and df.sweep
+    list.sweep[[this.label]] = this.result[c("solution","input.info")] # this.result$solution
+    list.sweep.ever.from.inflows [[this.label]] = ever.been.here.info$ever.been.here.from.inflows
+    list.sweep.ever.from.outflows[[this.label]] = ever.been.here.info$ever.been.here.from.outflows
+    
+    # Add this.label and the parameter multpliers to the this.result$solution data frame
+    this.result$solution$etiquette <- this.label
+    for(parameter in names(row)) {
+      this.result$solution[[paste0(parameter, operation.label)]] <- row[[parameter]]
+    }
+    
+    df.sweep = rbind(df.sweep,this.result$solution)
+  }
+  rownames(outcomes.summary.df) = c()
+  
+  list(parms.to.try=parms.to.try, 
+       outcomes.summary.df=outcomes.summary.df,
+       df,df.sweep=df.sweep,
+       # list.sweep.ever.from.inflows =list.sweep.ever.from.inflows,
+       # list.sweep.ever.from.outflows=list.sweep.ever.from.outflows,
+       list.sweep=list.sweep) 
+}
+

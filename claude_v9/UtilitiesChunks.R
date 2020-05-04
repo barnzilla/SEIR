@@ -79,3 +79,9 @@ overlap.length = function(L1,U1,L2,U2)
   pmax(pmin(U1,U2) - pmax(L1,L2),0)
 }
   
+verbose.save = function(object.name,path.with.trailing.slash="",prefix.suffix=c(prefix="This file contains an R object called ",suffix=".SavedFromR"))
+{
+  code = paste0(prefix.suffix["prefix"],object.name,prefix.suffix["suffix"])
+  code = paste0("save(",object.name,",file='",path.with.trailing.slash,code,"')")
+  eval(parse(text=code))
+}
