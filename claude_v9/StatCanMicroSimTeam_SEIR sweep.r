@@ -36,6 +36,7 @@ load_packages <- lapply(package_names, require, character.only = TRUE)
 WDir <- "C:/Users/maiko/Downloads/SEIR_Model"             # working directory **** NO TRAILING /   akin to choose.dir()  ****
 WDir <- "C:/Users/Claude/Desktop/WORK/PHAC/SEIR-Claude/v8_snapshot3_updated" # working directory **** NO TRAILING /   akin to choose.dir()  ****
 WDir <- "C:/Users/Cloud/Desktop/WORK/PHAC/SEIR-Claude/v9" # working directory **** NO TRAILING /   akin to choose.dir()  ****
+WDir <- "C:/Users/Claude/Desktop/WORK/PHAC/SEIR-Claude/v9_snapshot2" # working directory **** NO TRAILING /   akin to choose.dir()  ****
 
 #WDir <- choose.dir() # this does not generate a trailing slash or backslash
 cat(WDir)  # show folder chosen
@@ -86,19 +87,22 @@ source("SEIR.n.Age.Classes and friends.R")
     # NOTE: this is the only place where you name the parameters
     # NOTE: use the parameter name as it appears in the relevant Excel spreadsheet
     
-    LB = list( lambda=c(0.3,0.7) , delta  = c(0.4,0.7) )  
-    UB = list( lambda=c(0.4,0.8) , delta  = c(0.5,0.8) )
+    LB   = list( lambda=c(0.3 ,0.7 ) , delta  = c(0.4 ,0.7 ) )  
+    UB   = list( lambda=c(0.4 ,0.8 ) , delta  = c(0.5 ,0.8 ) )
+    apex = list( lambda=c(0.36,0.72) , delta  = c(0.48,0.77) )  
     
     
     parm.cloud.grid.specs = list(
       hypercube.lower.bounds = LB ,
       hypercube.upper.bounds = UB ,
+      hypercube.apex         = apex ,  # FORTHCOMING 
       n.repeat.within.hypercube = 100 , 
       racine = 42  ,
       
       use.this.transformation = function(x) {x} , # need to provide a function like exp here
       use.this.operation = c("overwrite","add","multiply")[1] ,
-      tmin.alter.scope = 81
+     # tmin.alter.scope = 81    # to alter only values of the parameters at tmin = 81
+      tmin.alter.scope = 0:81   # to alter all values of the parameters
     )
   }
   
@@ -128,7 +132,7 @@ source("SEIR.n.Age.Classes and friends.R")
   
   
       
-  # Random attempts
+  # Example 3) Random attempts
    if(TRUE)  # 1 hypercube with 
    {
       # NOTE: this is the only place where you name the parameters
@@ -136,7 +140,8 @@ source("SEIR.n.Age.Classes and friends.R")
       
       center = c(Cgg=0.25,Cgq=0.0,lambda=-0.75,sigma=-0.75) # Joel solution 5-8 with Cgq set to 0  (exp(Cgq) = 1).
       center = c(Cgg=0   ,Cgq=0  ,lambda=0    ,sigma=0) 
-      half.range = 0.1 + 0*center
+      half.range = 0.1 + 0*center # small  hypercube
+      half.range = 0.2 + 0*center # larger hypercube
       
       n.repeat.within.hypercube = 5
       n.repeat.within.hypercube = 400 
@@ -145,6 +150,8 @@ source("SEIR.n.Age.Classes and friends.R")
       parm.cloud.grid.specs = list(
          hypercube.lower.bounds = as.list( center - half.range ) ,
          hypercube.upper.bounds = as.list( center + half.range ) ,
+       # hypercube.lower.bounds = c(Cgg=0.05,Cgq=-0.4,lambda=-0.75,sigma=-0.75) , # can also spell out bounds
+       # hypercube.upper.bounds = c(Cgg=0.15,Cgq=-0.1,lambda=-0.25,sigma=-0.45) , # can also spell out bounds
          n.repeat.within.hypercube = n.repeat.within.hypercube, 
          racine = 42  ,  # random seed
          
@@ -183,6 +190,13 @@ list.sweep          = various.parms.result$list.sweep
   df.sweep          = various.parms.result$df.sweep
 outcomes.summary.df = various.parms.result$outcomes.summary.df
 
+# Backup
+verbose.save("list.sweep")          # creates file "This file contains an R object called list.sweep.SavedFromR". Use load() to read back 
+verbose.save("df.sweep")            # creates file "This file contains an R object called   df.sweep.SavedFromR". Use load() to read back 
+verbose.save("outcomes.summary.df") 
+verbose.save("parms.tried.df")  
+###verbose.save("various.parms.result")  
+
  names(list.sweep)[1:2]
  names(list.sweep[[2]])
  names(df.sweep)
@@ -219,11 +233,6 @@ outcomes.summary.df = various.parms.result$outcomes.summary.df
  # END Miscellaneous explorations
  
  
- verbose.save("list.sweep")          # creates file "This file contains an R object called list.sweep.SavedFromR". Use load() to read back 
- verbose.save("df.sweep")            # creates file "This file contains an R object called   df.sweep.SavedFromR". Use load() to read back 
- verbose.save("outcomes.summary.df") 
- verbose.save("parms.tried.df")  
- ###verbose.save("various.parms.result")  
  
  
  # BEGIN Example 2 continued ... Check if successful in replicating PHAC results in SEIR_results_1agegrpSC1_12 Figformated.xlsx
