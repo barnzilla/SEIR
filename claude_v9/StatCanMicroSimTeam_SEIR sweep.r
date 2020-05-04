@@ -28,9 +28,9 @@ rm(list = ls())
 #  packages
 #==========================================================================
 
-#package_names <- c("janitor","readxl","dplyr","deSolve","tidyr","ggplot2", "ggpubr", "tidyverse", "lhs") # , "viridis") 
+package_names <- c("janitor","readxl","dplyr","deSolve","tidyr","ggplot2", "ggpubr", "tidyverse", "lhs") # , "viridis") 
 #package_names <- c("readxl","deSolve", "lhs","dplyr","janitor") # ,"tidyr"
-#load_packages <- lapply(package_names, require, character.only = TRUE)
+load_packages <- lapply(package_names, require, character.only = TRUE)
 
 
 ### User input parameters
@@ -38,6 +38,7 @@ WDir <- "C:/Users/maiko/Downloads/SEIR_Model"             # working directory **
 WDir <- "C:/Users/Claude/Desktop/WORK/PHAC/SEIR-Claude/v8_snapshot3_updated" # working directory **** NO TRAILING /   akin to choose.dir()  ****
 WDir <- "C:/Users/Claude/Desktop/WORK/PHAC/SEIR-Claude/v9_snapshot2" # working directory **** NO TRAILING /   akin to choose.dir()  ****
 WDir <- "C:/Users/Cloud/Desktop/WORK/PHAC/SEIR-Claude/v9" # working directory **** NO TRAILING /   akin to choose.dir()  ****
+WDir <- "c:/users/joel/google drive/github/seir/claude_v9"
 
 #WDir <- choose.dir() # this does not generate a trailing slash or backslash
 cat(WDir)  # show folder chosen
@@ -149,7 +150,7 @@ source("SEIR.n.Age.Classes and friends.R")
       half.range = 0.2 + 0*center # larger hypercube
       
       n.repeat.within.hypercube = 5
-      n.repeat.within.hypercube = 400 
+      n.repeat.within.hypercube = 10 
       
      #half.range["beta"] = 0
       parm.cloud.grid.specs = list(
