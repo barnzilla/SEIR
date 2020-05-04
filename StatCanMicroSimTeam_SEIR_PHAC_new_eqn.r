@@ -107,6 +107,7 @@ for(p in required_Packages){
 
 ### User input parameters
 WDir <- "C:/Users/maiko/Downloads/SEIR_Model/"    # working directory 
+WDir <- "c:/users/joel/google drive/github/seir/"    # working directory 
 setwd(WDir)
 
 source("UtilitiesChunks.R") 

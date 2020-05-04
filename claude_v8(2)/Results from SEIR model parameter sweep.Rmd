@@ -1,0 +1,228 @@
+---
+title: "Results from SEIR model parameter sweep"
+author: "Microsim Team"
+date: '`r format(Sys.time(), "%B %d, %Y") `'
+output: 
+  html_document:
+    toc: true
+    number_sections: true
+    toc_float: true
+    toc_depth: 5
+    code_folding: show
+editor_options:
+  chunk_output_type: console
+---
+
+<style>
+  html, body { font-size: 14px; }
+  p { margin-bottom: 18px; }
+  h1 { margin-top: 30px; font-size: 1.75rem; }
+  h1.title {font-size: 2rem;  }
+  h2 { font-size: 1.35rem; margin-top: 30px; }
+  h3 { font-size: 1.15rem; margin-top: 30px; }
+  h4 { font-size: 1.05rem; margin-top: 30px; }
+  h4.date { margin-top: 0; margin-bottom: 3rem; }
+  p.caption { margin-top: 2rem; }
+  img { width: 100%; height: auto; }
+  blockquote { border-left: 5px solid #337ab7; border-bottom: 1px solid #efefef; font-weight: normal; font-size: 1rem; }
+  .dataTables_filter, .dataTables_length {font-weight: normal; }
+  div.main-container { width: 100% !important; max-width: 100% !important; margin-left: auto; margin-right: auto; }
+  td.dt-top { vertical-align: top; }
+  .level3 h3, .level4 h4 { color: #337ab7; font-weight: bold; }
+  .level4 h4 { margin-top: 96px;}
+  li > img { margin-top: 24px; margin-bottom: 24px; }
+</style>
+
+<img src="https://www.statcan.gc.ca/wet-boew4b/assets/sig-blk-en.svg" style = "max-width: 300px; height: auto; margin-bottom: 24px;" alt="logo">
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, dpi = 300)
+```
+
+> Note: these 300 scenarios were run with half.range = 0.4 (April 20th sheet).
+
+# Load packages to extend base R
+
+```{r}
+# Define packages that will be used to extend base R
+package_names <- c("janitor","readxl","dplyr","deSolve","tidyr","ggplot2", "ggpubr", "tidyverse", "shiny", "shinycssloaders", "DT", "scales", "plotly", "matrixcalc") 
+
+# Install any packages that do not exist
+install_packages <- lapply(package_names, FUN = function(x) if(! require(x, character.only = TRUE)) install.packages(x))
+
+# Load the packages
+load_packages <- lapply(package_names, require, character.only = TRUE)
+```
+
+# Import summary data
+
+```{r}
+outcomes.summary.df <- read.csv("c:/users/joel/google drive/github/seir/claude_v8(2)/300 scenarios - 0.4 half range, April 20 sheet.csv", stringsAsFactors = FALSE)
+```
+
+# Wrangle data
+
+```{r}
+# Create a scenario grouping variable (factor)
+lookup <- tibble(long = unique(outcomes.summary.df$etiquette), short = 1:length(unique(outcomes.summary.df$etiquette)))
+
+outcomes.summary.df$scenario <- factor(sapply(outcomes.summary.df$etiquette, function(x) lookup$short[x == lookup$long]))
+```
+
+# Scatter plots
+## Time (day number) by peak incidence
+
+```{r}
+# Print scatter plot
+plot_title <- paste0("Time (day number) by peak incidence, based on ", nrow(outcomes.summary.df)," scenarios")
+x_label <- "Peak incidence (individuals per day)"
+y_label <- "Time (day number)"
+point_size <- 0.5
+element_text_size <- 12
+plot_width <- 900
+plot_height <- 614
+ggplotly(ggplot(outcomes.summary.df, aes(x = maxI, y = maxI.time)) +
+    geom_point(aes(color = scenario), size = point_size) +
+    ggtitle(plot_title) +
+    xlab(x_label) +
+    ylab(y_label) +
+    theme_minimal() +
+    theme(
+       plot.title = element_text(size = element_text_size),
+       axis.title.x = element_text(size = element_text_size),
+       axis.title.y = element_text(size = element_text_size),
+       legend.text = element_text(size = element_text_size),
+       legend.title = element_blank()
+  ), width = plot_width, height = plot_height)
+```
+
+## Time (day number) of peak incidence by Cgg multiplier
+
+```{r}
+# Print scatter plot
+plot_title <- paste0("Time (day number) of peak incidence by Cgg multiplier, based on ", nrow(outcomes.summary.df)," scenarios")
+x_label <- "Cgg multiplier"
+ggplotly(ggplot(outcomes.summary.df, aes(x = Cgg.multiplier, y = maxI.time)) +
+    geom_point(aes(color = scenario), size = point_size) +
+    ggtitle(plot_title) +
+    xlab(x_label) +
+    ylab(y_label) +
+    theme_minimal() +
+    theme(
+       plot.title = element_text(size = element_text_size),
+       axis.title.x = element_text(size = element_text_size),
+       axis.title.y = element_text(size = element_text_size),
+       legend.text = element_text(size = element_text_size),
+       legend.title = element_blank()
+  ), width = plot_width, height = plot_height)
+```
+
+## Time (day number) of peak incidence by Cgq multiplier
+
+```{r}
+# Print scatter plot
+plot_title <- paste0("Time (day number) of peak incidence by Cgq multiplier, based on ", nrow(outcomes.summary.df)," scenarios")
+x_label <- "Cgq multiplier"
+ggplotly(ggplot(outcomes.summary.df, aes(x = Cgq.multiplier, y = maxI.time)) +
+    geom_point(aes(color = scenario), size = point_size) +
+    ggtitle(plot_title) +
+    xlab(x_label) +
+    ylab(y_label) +
+    theme_minimal() +
+    theme(
+       plot.title = element_text(size = element_text_size),
+       axis.title.x = element_text(size = element_text_size),
+       axis.title.y = element_text(size = element_text_size),
+       legend.text = element_text(size = element_text_size),
+       legend.title = element_blank()
+  ), width = plot_width, height = plot_height)
+```
+
+## Time (day number) of peak incidence by lambda multiplier
+
+```{r}
+# Print scatter plot
+plot_title <- paste0("Time (day number) of peak incidence by lambda multiplier, based on ", nrow(outcomes.summary.df)," scenarios")
+x_label <- "Lambda multiplier"
+ggplotly(ggplot(outcomes.summary.df, aes(x = lambda.multiplier, y = maxI.time)) +
+    geom_point(aes(color = scenario), size = point_size) +
+    ggtitle(plot_title) +
+    xlab(x_label) +
+    ylab(y_label) +
+    theme_minimal() +
+    theme(
+       plot.title = element_text(size = element_text_size),
+       axis.title.x = element_text(size = element_text_size),
+       axis.title.y = element_text(size = element_text_size),
+       legend.text = element_text(size = element_text_size),
+       legend.title = element_blank()
+  ), width = plot_width, height = plot_height)
+```
+
+## Time (day number) of peak incidence by beta multiplier
+
+```{r}
+# Print scatter plot
+plot_title <- paste0("Time (day number) of peak incidence by beta multiplier, based on ", nrow(outcomes.summary.df)," scenarios")
+x_label <- "Beta multiplier"
+ggplotly(ggplot(outcomes.summary.df, aes(x = beta.multiplier, y = maxI.time)) +
+    geom_point(aes(color = scenario), size = point_size) +
+    ggtitle(plot_title) +
+    xlab(x_label) +
+    ylab(y_label) +
+    theme_minimal() +
+    theme(
+       plot.title = element_text(size = element_text_size),
+       axis.title.x = element_text(size = element_text_size),
+       axis.title.y = element_text(size = element_text_size),
+       legend.text = element_text(size = element_text_size),
+       legend.title = element_blank()
+  ), width = plot_width, height = plot_height)
+```
+
+## Time (day number) of peak incidence by sigma multiplier
+
+```{r}
+# Print scatter plot
+plot_title <- paste0("Time (day number) of peak incidence by sigma multiplier, based on ", nrow(outcomes.summary.df)," scenarios")
+x_label <- "Sigma multiplier"
+ggplotly(ggplot(outcomes.summary.df, aes(x = sigma.multiplier, y = maxI.time)) +
+    geom_point(aes(color = scenario), size = point_size) +
+    ggtitle(plot_title) +
+    xlab(x_label) +
+    ylab(y_label) +
+    theme_minimal() +
+    theme(
+       plot.title = element_text(size = element_text_size),
+       axis.title.x = element_text(size = element_text_size),
+       axis.title.y = element_text(size = element_text_size),
+       legend.text = element_text(size = element_text_size),
+       legend.title = element_blank()
+  ), width = plot_width, height = plot_height)
+```
+
+# Data table
+
+```{r}
+datatable(outcomes.summary.df %>% select(-c(etiquette)) %>% mutate(maxI = as.integer(maxI), Cgg.multiplier = round(Cgg.multiplier, 3), Cgq.multiplier = round(Cgq.multiplier, 3), lambda.multiplier = round(lambda.multiplier, 3), beta.multiplier = round(beta.multiplier, 3), sigma.multiplier = round(sigma.multiplier, 3)) %>% arrange(desc(maxI.time, maxI)), 
+  extensions = c("Buttons", "Scroller"), 
+  options = list(
+    pageLength = 50, 
+    dom = "Bfrtip", 
+    buttons = c("colvis", "copy", "csv", "excel", "pdf"), 
+    deferRender = TRUE, 
+    searchDelay = 500,
+    initComplete = JS(
+      "function(settings, json) {",
+      "$(this.api().table().header()).css({'background-color': '#fff', 'color': '#111'});",
+      "}"
+    ),
+    columnDefs = list(
+      list(visible = FALSE, targets = c())
+    )
+  ), 
+  rownames = FALSE,
+  escape = FALSE,
+  editable = TRUE
+)
+```
