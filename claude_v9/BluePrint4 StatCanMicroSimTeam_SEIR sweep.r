@@ -36,6 +36,7 @@ load_packages <- lapply(package_names, require, character.only = TRUE)
 WDir <- "C:/Users/maiko/Downloads/SEIR_Model"             # working directory **** NO TRAILING /   akin to choose.dir()  ****
 WDir <- "C:/Users/Cloud/Desktop/WORK/PHAC/SEIR-Claude/v7" # working directory **** NO TRAILING /   akin to choose.dir()  ****
 WDir <- "C:/Users/Cloud/Desktop/WORK/PHAC/SEIR-PHAC snapsnots/Untitled_Message(From Antoinette April 20)" # working directory **** NO TRAILING /   akin to choose.dir()  ****
+WDir <- "c:/users/joel/google drive/github/seir/claude_v9"
 #WDir <- choose.dir() # this does not generate a trailing slash or backslash
 cat(WDir)  # show folder chosen
 setwd(WDir)
@@ -82,7 +83,7 @@ source("SEIR.n.Age.Classes and friends.R")
    for(this.lambda in lambda.candidates)
    {
       this.label = paste("delta=",this.lambda,"lambda=",this.lambda)
-      cat("\n Doing",this.label)
+      cat("\n Doing", this.label)
       
       parms.1d = baseline.parms.1d  # data frame of 1d parameters
       subset(parms.1d,tmin == lower.bound.last.time.interval)[c("delta","lambda")] = c(this.delta,this.lambda)
@@ -147,7 +148,7 @@ source("SEIR.n.Age.Classes and friends.R")
 
  
  # Define multipliers
- multipliers <- exp(seq(from = -0.5, to = 0.5, by = 0.5))
+ multipliers <- exp(seq(from = -1, to = 1, by = 0.05))
  
  # Apply multipliers to candidates
  # NOTE: this is the only place where you name the parameters
@@ -161,14 +162,6 @@ source("SEIR.n.Age.Classes and friends.R")
    sigma = multipliers
  )
   
-  candidates <- list(  
-    Cgg = multipliers,
-    Cgq = multipliers,
-    lambda = 1,
-    beta = 1,
-    sigma = 1
-  )  
- 
  # Compute all possible candidate by multiplier combinations
  multiplier_combos <- expand.grid(candidates, KEEP.OUT.ATTRS = FALSE)
  dim(multiplier_combos) # check size of sweep you are about to do  (number of scenarios , number of parameters)
@@ -178,10 +171,13 @@ source("SEIR.n.Age.Classes and friends.R")
  df.sweep = c()      # ... or store results in data.frame
  outcomes.summary.df = c()
  
+ set.seed(93)
+ multiplier_combos <- sample_n(multiplier_combos, 50)
+ 
  for(i in 1:nrow(multiplier_combos)) {
    row <- multiplier_combos[i,]
    this.label <- paste0(names(row), ".multiplier= ", row, collapse = " , ")
-   cat("\n Doing",this.label)
+   cat("\n Doing ", i, " of ", nrow(multiplier_combos), " - ", this.label)
    
    parms.1d = baseline.parms.1d  # data frame of 1d parameters to be altered
    parms.2d = baseline.parms.2d  # data frame of 2d parameters to be altered
@@ -212,6 +208,38 @@ source("SEIR.n.Age.Classes and friends.R")
      univariate.chunk[[paste0(parameter, ".multiplier")]] <- row[[parameter]]
    
    outcomes.summary.df = rbind(outcomes.summary.df,univariate.chunk)
+   
+   # Add other outcomes
+   # Compute L_tot
+   this.result$solution[["L_tot"]] <- this.result$solution %>% select_at(vars(starts_with("L"))) %>% rowSums()
+   
+   # Compute I_tot
+   this.result$solution[["I_tot"]] <- this.result$solution %>% select_at(vars(starts_with("I"))) %>% rowSums()
+   
+   # Compute Incidence	(number of new cases each day, over time [incidence])
+   IncI <- c()
+   
+   for(j in 1:nrow(this.result$solution)) {	
+      if(j == 1) {	
+         IncI[j] <- this.result$solution$I_tot[1]	
+      } else {	
+         sigma <- parms.1d %>% filter(this.result$solution$time[j] > tmin & this.result$solution$time[j] <= tmax) %>% select(sigma)
+         IncI[j] <- this.result$solution$L_tot[j - 1] * sigma
+      }	
+   }	
+   this.result$solution[["IncI"]] <- unlist(IncI)
+   
+   # Compute cumulative incidence
+   this.result$solution[["cumI"]] <- cumsum(IncI)
+   
+   # Compute Hospitalized
+   this.result$solution[["Hosp"]] <- this.result$solution$Iss_hosp
+   
+   # Compute Quarantined
+   this.result$solution[["Quarant"]] <- this.result$solution$Lq + this.result$solution$Iq_pres + this.result$solution$Iaq_r
+   
+   # Compute Isolated
+   this.result$solution[["Isolat"]] <- this.result$solution$Ism_iso + this.result$solution$Iss_isohome
      
    list.sweep[[this.label]] = this.result$solution
    
@@ -223,6 +251,8 @@ source("SEIR.n.Age.Classes and friends.R")
    
    df.sweep = rbind(df.sweep,this.result$solution)
  }
+ 
+ outcomes.summary.df
  
  
  names(list.sweep)
@@ -236,9 +266,67 @@ source("SEIR.n.Age.Classes and friends.R")
  plot(outcomes.summary.df$maxI, outcomes.summary.df$maxI.time)
  # plot(subset(df.sweep,time<50)$time , subset(df.sweep,time<50)$S2,type="l") 
  
+ # Create a simulation grouping variable (factor)
+ lookup <- tibble(long = unique(outcomes.summary.df$etiquette), short = 1:length(unique(outcomes.summary.df$etiquette)))
+ outcomes.summary.df$Simulation <- factor(sapply(outcomes.summary.df$etiquette, function(x) lookup$short[x == lookup$long]))
+ 
+ 
+ line_plot <- ggplot(outcomes.summary.df, aes(x = maxI, y = maxI.time)) +
+    geom_point(aes(color = Simulation), size = 0.55) +
+    ggtitle(paste0("Time by maximum incidence, based on 1,024 simulations")) +
+    xlab("Maximum incidence (individuals)") +
+    ylab("Time (days)") +
+    theme_minimal() +
+    theme(
+       plot.title = element_text(size = 12),
+       axis.title.x = element_text(size = 12),
+       axis.title.y = element_text(size = 12),
+       legend.text = element_text(size = 12),
+       legend.title = element_blank()
+    )
+ ggplotly(line_plot)
+ 
+ mod <- lm(maxI.time ~ Cgg.multiplier + Cgq.multiplier + lambda.multiplier + beta.multiplier + sigma.multiplier, data = outcomes.summary.df)
+ mod <- lm(maxI.time ~ Cgg.multiplier + Cgq.multiplier + lambda.multiplier + beta.multiplier + sigma.multiplier, data = outcomes.summary.df)
+ predict.lm(mod, newdata = data.frame(Cgg.multiplier = seq(from = 1.1, to = 1.5, by = 0.05), Cgq.multiplier = rep(2.075081, 9), lambda.multiplier = rep(2.075081, 9), beta.multiplier = seq(from = 2.03, to = 2.20, by = 0.02), sigma.multiplier = rep(0.481909, 9)), interval="confidence", level=0.90, type="response")
+ 
+ cgg = 1.68
+beta = 1.8
+ 98.7749 + -7.6497 * cgg - 5.8641 * beta
  
  # END 4) parameter sweep to match with old model ... let us consider old SC1 (lambda = 0.5, delta=0.3) 
  
+ # Create a simulation grouping variable (factor)
+ lookup <- tibble(long = unique(df.sweep$etiquette), short = 1:length(unique(df.sweep$etiquette)))
+ df.sweep$Simulation <- factor(sapply(df.sweep$etiquette, function(x) lookup$short[x == lookup$long]))
  
+ # Install plotly if not installed
+ install_packages <- lapply("plotly", FUN = function(x) if(! require(x, character.only = TRUE)) install.packages(x))
  
+ # Load plotly if not loaded
+ load_packages <- lapply("plotly", require, character.only = TRUE)
+ 
+ # Function to print line plot
+ get_line_plot <- function(compartment) {
+    line_plot <- ggplot(df.sweep, aes(x = time, y = !!rlang::sym(compartment))) +
+       geom_line(aes(color = Simulation), size = 0.25) +
+       ggtitle(paste0("Distributions for ", compartment, ", by simulation")) +
+       xlab("Time (days)") +
+       ylab("Count (individuals)") +
+       theme_minimal() +
+       theme(
+          plot.title = element_text(size = 12),
+          axis.title.x = element_text(size = 12),
+          axis.title.y = element_text(size = 12),
+          legend.text = element_text(size = 12),
+          legend.title = element_blank()
+       )
+    ggplotly(line_plot)
+ }
+ 
+ get_line_plot(compartment = "I_tot") 
+ 
+ library("corrplot")
+ cor_mat <- cor(outcomes.summary.df %>% select(maxI.time, Cgg.multiplier, Cgq.multiplier, lambda.multiplier, beta.multiplier, sigma.multiplier))
+ corrplot(cor_mat, type="upper")
  

@@ -57,8 +57,8 @@ source("SEIR.n.Age.Classes and friends.R")
 
   #  User specifies file_name, sheet_names, lower.bound, upper.boud, n.repeat, racine, use.this.operation and tmin.alter.scope
    
- # file_name = "BluePrint4 Conceptual model_V4_20200415V2(5agegrp)_SC1 - April20.xls" # lambda = 0.5 ... 0.5, 0.5  delta = 0.3 ... 0.3, 0.3
-   file_name = "BluePrint4 Conceptual model_V4_20200415V2(5agegrp)_SC1.xls" # lambda = 0.5 ... 0.5, 0.5  delta = 0.3 ... 0.3, 0.3
+  file_name = "BluePrint4 Conceptual model_V4_20200415V2(5agegrp)_SC1 - April20.xls" # lambda = 0.5 ... 0.5, 0.5  delta = 0.3 ... 0.3, 0.3
+ #  file_name = "BluePrint4 Conceptual model_V4_20200415V2(5agegrp)_SC1.xls" # lambda = 0.5 ... 0.5, 0.5  delta = 0.3 ... 0.3, 0.3
   sheet_names = list(initial.conditions="Initial conditions",parms.1d="Parameters by Age",parms.2d="Parameters by Age x Age",model.flow="Model Specs (not lazy)",auxiliary.vars="Intermediate calculations")
    
    if(FALSE)  # DH's initial systematic (non random) search

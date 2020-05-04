@@ -35,7 +35,7 @@ load_packages <- lapply(package_names, require, character.only = TRUE)
 ### User input parameters
 WDir <- "C:/Users/maiko/Downloads/SEIR_Model"             # working directory **** NO TRAILING /   akin to choose.dir()  ****
 WDir <- "C:/Users/Cloud/Desktop/WORK/PHAC/SEIR-Claude/v7" # working directory **** NO TRAILING /   akin to choose.dir()  ****
-WDir <- "C:/Users/Cloud/Desktop/WORK/PHAC/SEIR-Claude/v8" # working directory **** NO TRAILING /   akin to choose.dir()  ****
+WDir <- "c:/users/joel/google drive/github/seir/claude_v8(3)" # working directory **** NO TRAILING /   akin to choose.dir()  ****
 
 #WDir <- choose.dir() # this does not generate a trailing slash or backslash
 cat(WDir)  # show folder chosen
@@ -94,7 +94,7 @@ source("SEIR.n.Age.Classes and friends.R")
       lower.bound = as.list( exp(center - half.range ) ) 
       upper.bound = as.list( exp(center + half.range ) )
      
-      n.repeat = 300 # repetitions above and beyond the expansion of upper.bound, lower.bound
+      n.repeat = 400 # repetitions above and beyond the expansion of upper.bound, lower.bound
       racine = 42
       
       use.this.operation = c("overwrite","add","multiply")[3]
