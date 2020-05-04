@@ -145,7 +145,7 @@ source("SEIR.n.Age.Classes and friends.R")
       half.range = 0.2 + 0*center # larger hypercube
       
       n.repeat.within.hypercube = 5
-      n.repeat.within.hypercube = 400 
+      n.repeat.within.hypercube = 10 
       
      #half.range["beta"] = 0
       parm.cloud.grid.specs = list(
