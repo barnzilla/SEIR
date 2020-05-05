@@ -45,6 +45,7 @@ ui <- navbarPage(
          uiOutput("outcome_variable"),
          uiOutput("method"),
          uiOutput("label"),
+         uiOutput("plot_bin_width"),
          width = 3
        ),
        mainPanel(
@@ -80,6 +81,20 @@ server <- function(input, output) {
     if(length(t) < 2) object <- NULL else object <- t
     return(object)
   }
+  
+  # Build a slider to adjust the bin width on the tornado plot
+  output$plot_bin_width <- renderUI({
+    if(is.null(cached$object)) {
+      return()
+    } else {
+      if(is.null(input$plot_bin_width)) {
+        plot_bin_width <- 0.25
+      } else {
+        plot_bin_width <- input$plot_bin_width
+      }
+      sliderInput("plot_bin_width", "Bin width", min = 0.05, max = 1, step = 0.05, value = plot_bin_width)
+    }
+  })
   
   # Build a slider to adjust the dot size on the scatter plot
   output$geom_point_size <- renderUI({
@@ -181,18 +196,17 @@ server <- function(input, output) {
           label_content <- ""
         }
         what.matters = Assess.covariate.importance(outcomes.summary.df,names(parms.tried.df), input$outcome_variable, method = input$method)
-        dat <- tibble(variable = names(what.matters), value = abs(what.matters))
+        dat <- tibble(variable = names(what.matters), value = what.matters)
         dat$variable <- factor(dat$variable)
         dat$variable <- fct_reorder(dat$variable, dat$value, .desc = FALSE)
-        dat <- rbind(dat, tibble(variable = names(what.matters), value = dat$value * -1))
         point_size <- 2
         element_text_size <- 12
         ggplotly(ggplot(dat, aes(x = variable, y = value)) +
-        geom_bar(color = "#428bca", fill = "#428bca", stat = "identity") +
-        geom_text(label = label_content, size = 3.5) +
+        geom_bar(color = "#428bca", fill = "#428bca", stat = "identity", width = input$plot_bin_width) +
+        geom_text(label = label_content, size = 3.5, hjust = -3) +
         coord_flip() +
         theme_minimal() +
-        ylab(input$outcome_variable) +
+        ylab(paste0("Strength of correlation with ", input$outcome_variable)) +
         theme(
           plot.title = element_text(size = element_text_size),
           axis.title.y = element_blank(),
