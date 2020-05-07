@@ -30,6 +30,10 @@ rm(list = ls())
 
 package_names <- c("janitor","readxl","dplyr","deSolve","tidyr","ggplot2", "ggpubr", "tidyverse", "lhs") # , "viridis") 
 package_names <- c("readxl","dplyr","tidyr","janitor"  ,  "deSolve","triangle","lhs") # 
+
+# Install packages if they haven't been installed previously
+install_packages <- lapply(package_names, FUN = function(x) if(! require(x, character.only = TRUE)) install.packages(x))
+
 load_packages <- lapply(package_names, require, character.only = TRUE)
 
 
