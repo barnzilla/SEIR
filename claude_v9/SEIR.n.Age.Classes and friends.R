@@ -1,5 +1,5 @@
 
-SEIR.n.Age.Classes = function(file.name, sheets.names, differential.eqns.func=NULL , also.get.flows=NULL)
+SEIR.n.Age.Classes = function(file.name, sheets.names, differential.eqns.func=NULL, post.processing.func=NULL ,post.processing.companion.kit=NULL, also.get.flows=NULL)
 {
   #sheets.names is list(parms.1d,  parms.2d,  initial.conditions,  model.flow,  auxiliary.vars)
   
@@ -10,22 +10,22 @@ SEIR.n.Age.Classes = function(file.name, sheets.names, differential.eqns.func=NU
   #==========================================================================
   #browser()
   
-  time_stuff   = sheets.names$parms.1d            # 1 dimensional parameters
-  time_stuff_m = sheets.names$parms.2d            # 2 dimensional parameters
-  input_stuff  = sheets.names$initial.conditions  # initial values/conditions
+  tmp_time_stuff   = sheets.names$parms.1d            # 1 dimensional parameters
+  tmp_time_stuff_m = sheets.names$parms.2d            # 2 dimensional parameters
+  input_stuff      = sheets.names$initial.conditions  # initial values/conditions
   
-  if(!is.data.frame(time_stuff))
-    time_stuff   <- as.data.frame.from.tbl( readxl::read_excel(file.name, sheet = time_stuff) )  # 1 dimensional parameters
+  if(!is.data.frame(tmp_time_stuff))
+    tmp_time_stuff   <- as.data.frame.from.tbl( readxl::read_excel(file.name, sheet = tmp_time_stuff) )  # 1 dimensional parameters
   
-  if(!is.data.frame(time_stuff_m))  
-    time_stuff_m <- as.data.frame.from.tbl( readxl::read_excel(file.name, sheet = time_stuff_m) ) # 2 dimensional parameters
+  if(!is.data.frame(tmp_time_stuff_m))  
+    tmp_time_stuff_m <- as.data.frame.from.tbl( readxl::read_excel(file.name, sheet = tmp_time_stuff_m) ) # 2 dimensional parameters
   
   if(!is.data.frame(input_stuff)) 
     input_stuff  <- as.data.frame.from.tbl( readxl::read_excel(file.name, sheet = input_stuff) ) # initial values/conditions
   
   raw.init.conditions = input_stuff # keep snapshot for output.  input_stuff may be altered later
   
-  nagegrp <- length(unique(time_stuff$agegrp))        # number of age groups
+  nagegrp <- length(unique(tmp_time_stuff$agegrp))        # number of age groups
   nagegrp = ncol(raw.init.conditions) - 1             # number of age groups
   agegrp.suffix = ""
   if(nagegrp > 1)
@@ -35,23 +35,51 @@ SEIR.n.Age.Classes = function(file.name, sheets.names, differential.eqns.func=NU
   raw.compartments.age = c ( t( outer( raw.compartments,agegrp.suffix,paste0) ) ) # e.g. S1 S2 S3 S4 S5 D1 D2 ...
   
   
-  nrow_   <- dim(time_stuff)[1]/nagegrp
+  nrow_   <- dim(tmp_time_stuff)[1]/nagegrp
   
-  time_stuff <- dplyr::arrange(time_stuff, tmin, agegrp) # sort by tmin agegrp
+  time_stuff <- dplyr::arrange(tmp_time_stuff, tmin, agegrp) # sort by tmin agegrp
   time_stuff <- time_stuff %>%
     mutate(isim = rep(1:nrow_, each=nagegrp)) 
   
-  time_stuff_m <- arrange(time_stuff_m, tmin, cagegrp, ragegrp) # sort by tmin cagegrp  ragegrp
+  time_stuff_m <- dplyr::arrange(tmp_time_stuff_m, tmin, cagegrp, ragegrp) # sort by tmin cagegrp  ragegrp
   time_stuff_m <- time_stuff_m %>%
     mutate(isim = rep(1:nrow_, each = nagegrp*nagegrp))
  
   #===================================================================
-  # Build function post.processing
+  # Build function eval.post.processing.func (if not provided) 
   #===================================================================
   
-  #LATER
-  #post.processing.code <- as.data.frame.from.tbl( readxl::read_excel(file.name, sheet = sheets.names$post.processing ) )  
- 
+  code.body.df = sheets.names$post.processing # data.frame or string
+  if(!is.data.frame(code.body.df))
+    code.body.df = as.data.frame.from.tbl( readxl::read_excel(file.name, sheet = code.body.df ) )
+  
+  code.body.df$code[is.na(code.body.df$code)] = ""
+  
+  eval.post.processing.func = post.processing.func
+  if(is.null(eval.post.processing.func))
+  {
+    code.body.char = code.body.df$code
+    code.head.char = c("function(list.solution.etcetera){",
+                       "# list.solution.etcetera contains $solution and possibly $solution.inflows and/or $solution.outflows" , 
+                       "# Probably could use    with(list.solution.etcetera)   instead of copying" , 
+                       "solution          = list.solution.etcetera$solution",
+                       "solution.inflows  = list.solution.etcetera$solution.inflows",
+                       "solution.outflows = list.solution.etcetera$solution.outflows",
+                       "parms.1d          = list.solution.etcetera$input.info$parms.1d",
+                       "parms.2d          = list.solution.etcetera$input.info$parms.2d",
+                       "companion.kit     = list.solution.etcetera$post.processing.companion.kit",
+                       "sommaire          = data.frame(osqvhfipumzcdjblkwrgnexaty=4)" ,
+                       "## BEGIN code from excel"  )
+    code.tail.char = c("## END code from excel",
+                       "sommaire$osqvhfipumzcdjblkwrgnexaty=c()",
+                       "list.solution.etcetera$solution = solution # only solution may be modified",
+                       "list.solution.etcetera$sommaire = sommaire # add on new kid on the block",
+                       "list.solution.etcetera",
+                       "#list(sommaire=sommaire,solution.inflows=solution.inflows,solution.outflows=solution.outflows)" )
+    
+    eval.post.processing.func = paste(c(code.head.char , code.body.char , code.tail.char , "}"),collapse="\n" )
+    eval.post.processing.func = eval(parse(text= eval.post.processing.func )) # from text to function
+  }
   
   #===================================================================
   # Build function eval.differential.eqns.func (if not provided)
@@ -245,15 +273,6 @@ SEIR.n.Age.Classes = function(file.name, sheets.names, differential.eqns.func=NU
   ################################################################
   
   excluded_names <- c("tmin", "tmax","agegrp","cagegrp","ragegrp","isim")
-  sprintf("S(E)IR model script to estimate the number of COVID-19 cases")
-  sprintf("Number of age groups considered: %s", nagegrp)
-  sprintf("Components:")
-  sprintf( names(init_list) )
-  sprintf("Parameters that change with age (age-groups):")
-  sprintf( setdiff(colnames(time_stuff  ), excluded_names) )
-  sprintf("Parameters that change with age and contact with others (age-groups x age-groups):")
-  sprintf( setdiff(colnames(time_stuff_m), excluded_names) )
-  sprintf("...Computing ... ")
   
   nSim <- max(time_stuff$isim)
   listOut <- list()
@@ -311,7 +330,9 @@ SEIR.n.Age.Classes = function(file.name, sheets.names, differential.eqns.func=NU
     listOut[[i]] <- out
   } #end for(i in seq(1, nSim, 1))
   
-  resultat = list( differential.eqns.func = eval.differential.eqns.func ) 
+  resultat = list( differential.eqns.func = eval.differential.eqns.func ,
+                   eval.post.processing.func = eval.post.processing.func,
+                   post.processing.companion.kit = post.processing.companion.kit) 
   
   #BEGIN add on $solution.inflows, $solution.outflows and $solution to resultat
   solution = df.out
@@ -330,10 +351,11 @@ SEIR.n.Age.Classes = function(file.name, sheets.names, differential.eqns.func=NU
   resultat$solution = solution[,c("time",raw.compartments.age)]  
   #END add on $solution.inflows, $solution.outflows and $solution to resultat
   
-  resultat$input.info = list(parms.1d=time_stuff, parms.2d=time_stuff_m, initial.conditions=raw.init.conditions,
-                             auxiliary.vars=auxiliary.vars,model.flow=model_flows_tmp)
+  resultat$input.info = list(parms.1d=tmp_time_stuff, parms.2d=tmp_time_stuff_m, initial.conditions=raw.init.conditions,
+                             auxiliary.vars=auxiliary.vars, model.flow=model_flows_tmp, post.processing=code.body.df)
   resultat$input.info.verbatim = input.info.verbatim
-  resultat
+  
+  eval.post.processing.func(resultat)
 } #end of SEIR.n.Age.Classes function
 
 
@@ -405,87 +427,6 @@ smooch.parms.df.into.list = function(df.parms.1d,df.parms.2d,these.are.not.parms
   as.list(c(list.parm.1d,list.parm.2d))
 }
 
-
-
-Add.Other.Outcomes = function(solution.df,parms.1d,definition.list)
-{  # definition.list not used.  Could be something like list(L_tot = "L*", Quarant = c("Lq" ,"Iq_pres" ,"Iaq_r") , Hosp = "Iss_hosp")
-  
-  # Add other outcomes
-  # Compute L_tot
-  solution.df[["L_tot"]] <- solution.df %>% select_at(vars(starts_with("L"))) %>% rowSums()
-  
-  # Compute I_tot
-  solution.df[["I_tot"]] <- solution.df %>% select_at(vars(starts_with("I"))) %>% rowSums()
-  
-  # Compute Incidence  (number of new cases each day, over time [incidence])
-  IncI <- c()
-  
-  for(j in 1:nrow(solution.df)) { 
-    if(j == 1) {  
-      IncI[j] <- solution.df$I_tot[1]   
-    } else {  
-      sigma <- parms.1d %>% filter(solution.df$time[j] > tmin & solution.df$time[j] <= tmax) %>% select(sigma)
-      IncI[j] <- solution.df$L_tot[j - 1] * sigma
-    } 
-  }    
-  solution.df[["IncI"]] <- unlist(IncI)
-  
-  # Compute cumulative incidence
-  solution.df[["cumI"]] <- cumsum(IncI)
-  
-  # Compute Hospitalized
-  solution.df[["Hosp"]] <- solution.df$Iss_hosp
-  
-  # Compute Quarantined
-  solution.df[["Quarant"]] <- solution.df$Lq + solution.df$Iq_pres + solution.df$Iaq_r
-  
-  # Compute Isolated
-  solution.df[["Isolat"]] <- solution.df$Ism_iso + solution.df$Iss_isohome
-  
-  solution.df
-}
-
-Outcomes.Summary = function(solution.df,targets)  # content to be expanded
-{
-  maxI = max(solution.df$I_tot)
-  
-  sommaire=data.frame(maxI=maxI,maxI.time = subset(solution.df,I_tot==maxI)$time)
-  sommaire$cumI.75days = subset(solution.df,time==75)$cumI
-  sommaire$total.deaths = max(solution.df$D)
-  
-  
-  sommaire$maxInc     <- max(solution.df$IncI)
-  sommaire$maxItot    <- max(solution.df$I_tot)
-  sommaire$daymaxInc  <- subset(solution.df , IncI  == sommaire$maxInc  )$time 
-  sommaire$daymaxItot <- subset(solution.df , I_tot == sommaire$maxItot )$time 
-  
-  sommaire$AR <- (max(solution.df$S) - min(solution.df$S))/max(solution.df$S)*100
-  
-  
-  sommaire$epilength1<-min( solution.df$time[solution.df$cumI==max(solution.df$cumI)] )
-  
-  IncIbelow1 = solution.df$IncI <1 & solution.df$time > sommaire$daymaxInc
-  sommaire$epilength2 <- which.max(IncIbelow1)[1]-1 # For a logical vector x with both FALSE and TRUE values, which.max(x) return the index of the first TRUE
-  
-  
-  if(length(setdiff( colnames(targets$donnees) , colnames(solution.df)  ) )>0 )
-    stop("\nAll variables in targets$donnees should be in solution.df")
-  
-  Ynames = setdiff(colnames(targets$donnees),"time")
-  
-  for(k in seq(nrow(targets$time.ranges)))
-  {
-    time.span = targets$time.ranges[k,]
-    time.span.char = paste(time.span,collapse="-")
-    model = subset(solution.df     , time.span$lower.bound <= time & time <=  time.span$upper.bound)[,Ynames,drop=F]
-    dat   = subset(targets$donnees , time.span$lower.bound <= time & time <=  time.span$upper.bound)[,Ynames,drop=F]
-    erreur = apply(abs(model-dat),2,sum)
-    names(erreur) = paste("GOF",names(erreur),"days",time.span.char) # e.g. "GOF cumI days 60-69" "GOF D days 60-69"
-    sommaire = cbind(sommaire, t(as.data.frame(erreur)) )
-  } 
-  
-  sommaire
-}
 
 
 ever.been.here = function(SEIR.object)  
@@ -576,7 +517,7 @@ SaveModelInExcel = function(input.info.list,file_name,map.names)
 
 
 
-try.various.parms.values = function(SEIR.object,parm.cloud.grid.specs,covid.targets,only.show.parms.to.try=FALSE)
+try.various.parms.values = function(SEIR.object,parm.cloud.grid.specs,only.show.parms.to.try=FALSE)
 { 
   #parm.cloud.grid.specs is a list that should contain the following 7 things
   # *  $hypercube.lower.bounds , $hypercube.upper.bounds, $hypercube.apex.mode
@@ -614,8 +555,8 @@ try.various.parms.values = function(SEIR.object,parm.cloud.grid.specs,covid.targ
   if(any(colnames(lower.bound.expanded) != colnames(upper.bound.expanded) ))
     stop('column name mismatch')
   
-  lower.bound.expanded = lower.bound.expanded[rep(seq(nrow(lower.bound.expanded)) , n.repeat ),]
-  upper.bound.expanded = upper.bound.expanded[rep(seq(nrow(upper.bound.expanded)) , n.repeat ),]
+  lower.bound.expanded = lower.bound.expanded[rep(seq(nrow(lower.bound.expanded)) , n.repeat ),,drop=F]
+  upper.bound.expanded = upper.bound.expanded[rep(seq(nrow(upper.bound.expanded)) , n.repeat ),,drop=F]
   lower.bound.expanded = data.matrix(lower.bound.expanded)
   upper.bound.expanded = data.matrix(upper.bound.expanded)
   if(!is.null(apex))
@@ -633,9 +574,9 @@ try.various.parms.values = function(SEIR.object,parm.cloud.grid.specs,covid.targ
   # parms.to.try = (upper.bound.expanded - lower.bound.expanded) *  random.vect
   # parms.to.try = lower.bound.expanded + parms.to.try
   if(is.null(apex))
-    parms.to.try = qunif    (random.vect,lower.bound.expanded,upper.bound.expanded)
+    parms.to.try =    stats::qunif    (random.vect,lower.bound.expanded,upper.bound.expanded)
   else
-    parms.to.try = qtriangle(random.vect,lower.bound.expanded,upper.bound.expanded,apex.expanded)
+    parms.to.try = triangle::qtriangle(random.vect,lower.bound.expanded,upper.bound.expanded,apex.expanded)
     
   parms.to.try = 0*lower.bound.expanded + parms.to.try
   parms.to.try = parm.cloud.grid.specs$backend.transformation(parms.to.try)
@@ -656,6 +597,8 @@ try.various.parms.values = function(SEIR.object,parm.cloud.grid.specs,covid.targ
   baseline.parms.1d = SEIR.object$input.info$parms.1d  # data frame of 1d parameters
   baseline.parms.2d = SEIR.object$input.info$parms.2d  # data frame of 2d parameters
   
+  post.process.kit  = SEIR.object$post.processing.companion.kit
+  
   flows.of.interest = gsub("solution.","",intersect(names(SEIR.object),c("solution.inflows","solution.outflows")))
   
   
@@ -666,9 +609,10 @@ try.various.parms.values = function(SEIR.object,parm.cloud.grid.specs,covid.targ
   outcomes.summary.df = c()
   ever.been.here.info= list(ever.been.here.from.inflows=0         , ever.been.here.from.outflows=0         ) # numeric   --> do not bypass
   ever.been.here.info= list(ever.been.here.from.inflows="Not done", ever.been.here.from.outflows="Not done") # character -->        bypass
-
+  
   for(i in 1:nrow(lower.bound.expanded)) {
     row <-  parms.to.try[i,] 
+    names(row) = colnames(parms.to.try)
     #this.label <- paste0(names(row),       ".multiplier= ", row, collapse = " , ")
     this.label <- paste0(names(row), operation.label, "= ", row, collapse = " , ")
     
@@ -692,22 +636,24 @@ try.various.parms.values = function(SEIR.object,parm.cloud.grid.specs,covid.targ
     sheet_names_for_sweep$parms.1d = parms.1d # altered data.frame goes in sheet_names_for_sweep
     sheet_names_for_sweep$parms.2d = parms.2d # altered data.frame goes in sheet_names_for_sweep
     
-    this.result = SEIR.n.Age.Classes(file_name,sheet_names_for_sweep,also.get.flows=flows.of.interest) 
+    this.result = SEIR.n.Age.Classes(file_name,sheet_names_for_sweep,also.get.flows=flows.of.interest,post.processing.companion.kit = post.process.kit) 
     
-    # Add on other time series like cumulative incidence
-    this.result$solution = Add.Other.Outcomes (this.result$solution,parms.1d,"third argument currently inoperant")
+   # # Add on other time series like cumulative incidence
+   # this.result$solution = Add.Other.Outcomes(this.result$solution,parms.1d,"third argument currently inoperant")
     
     # Add on univariate stuff like maxI or maxI.time to outcomes.summary.df
     summary.template = data.frame(etiquette = this.label)
     for(parameter in names(row)) 
       summary.template[[paste0(parameter, operation.label)]] <- row[[parameter]]
-    summary.chunk = Outcomes.Summary(this.result$solution,covid.targets)
+    
+    summary.chunk = this.result$sommaire
     summary.chunk = cbind(summary.template,summary.chunk)
     # summary.chunk$etiquette = this.label # not sure if this is useful to keep
     # for(parameter in names(row)) 
     #  summary.chunk[[paste0(parameter, operation.label)]] <- row[[parameter]]
     
     outcomes.summary.df = rbind(outcomes.summary.df,summary.chunk)
+    #print(names(outcomes.summary.df))
     
     # Get ever.been.here info
     if(!is.character(ever.been.here.info$ever.been.here.from.inflows))

@@ -29,7 +29,7 @@ rm(list = ls())
 #==========================================================================
 
 package_names <- c("janitor","readxl","dplyr","deSolve","tidyr","ggplot2", "ggpubr", "tidyverse", "lhs") # , "viridis") 
-#package_names <- c("readxl","deSolve", "lhs","dplyr","janitor") # ,"tidyr"
+package_names <- c("readxl","dplyr","tidyr","janitor"  ,  "deSolve","triangle","lhs") # 
 load_packages <- lapply(package_names, require, character.only = TRUE)
 
 
@@ -37,8 +37,7 @@ load_packages <- lapply(package_names, require, character.only = TRUE)
 WDir <- "C:/Users/maiko/Downloads/SEIR_Model"             # working directory **** NO TRAILING /   akin to choose.dir()  ****
 WDir <- "C:/Users/Claude/Desktop/WORK/PHAC/SEIR-Claude/v8_snapshot3_updated" # working directory **** NO TRAILING /   akin to choose.dir()  ****
 WDir <- "C:/Users/Claude/Desktop/WORK/PHAC/SEIR-Claude/v9_snapshot2" # working directory **** NO TRAILING /   akin to choose.dir()  ****
-WDir <- "C:/Users/Cloud/Desktop/WORK/PHAC/SEIR-Claude/v9" # working directory **** NO TRAILING /   akin to choose.dir()  ****
-WDir <- "c:/users/joel/google drive/github/seir/claude_v9"
+WDir <- "C:/Users/Cloud/Desktop/WORK/PHAC/SEIR-Claude/v10" # working directory **** NO TRAILING /   akin to choose.dir()  ****
 
 #WDir <- choose.dir() # this does not generate a trailing slash or backslash
 cat(WDir)  # show folder chosen
@@ -77,13 +76,14 @@ source("SEIR.n.Age.Classes and friends.R")
    file_name = "BluePrint4 Conceptual model_V4_20200415V2(1agegrp)_SC1 - April23.xls" # From PHAC"s misnamed "...(1agegrp)_SC1.xls" shared on April 23
    file_name = "BluePrint4 Conceptual model_V4_20200415V2(1agegrp)_SC1 - April23 - MaxTime222.xls"
    
-  sheet_names = list(initial.conditions="Initial conditions",parms.1d="Parameters by Age",parms.2d="Parameters by Age x Age",model.flow="Model Specs (not lazy)",auxiliary.vars="Intermediate calculations")
+  sheet_names = list(initial.conditions="Initial conditions",parms.1d="Parameters by Age",parms.2d="Parameters by Age x Age",
+                      model.flow="Model Specs (not lazy)",auxiliary.vars="Intermediate calculations",post.processing="Post Processing")
   # END MODEL WORKBOOK  -->   file_name and  sheet_names 
   
   
   # BEGIN Sampling specs --> hypercube.upper.bounds , hypercube.lower.bounds, n.repeat.within.hypercube, racine, backend.transformation, reference.alteration, tmin.alter.scope
   
-  #  3 different examples provided below
+  #  4 different examples provided below
 
   # Example 1) Silly : 4 hypercubes with 100 attemps in each cube
   if(FALSE)   
@@ -137,9 +137,36 @@ source("SEIR.n.Age.Classes and friends.R")
   }
   
   
+  
+  # Example 3) Random attempts univariate (one parameter)
+  if(FALSE)  # 1 hypercube with several attempts within it
+  {
+    # NOTE: this is the only place where you name the parameters
+    # NOTE: use the parameter name as it appears in the relevant Excel spreadsheet
+    
+    center = c(sigma=0) 
+    half.range = 0.1 + 0*center # small  hypercube
+    half.range = 0.2 + 0*center # larger hypercube
+    
+    n.repeat.within.hypercube = 5
+    
+    parm.cloud.grid.specs = list(
+      hypercube.lower.bounds = as.list( center -     half.range ) ,
+      hypercube.upper.bounds = as.list( center +     half.range ) ,
+      hypercube.apex.mode    = as.list( center +0.2* half.range ) ,
+      n.repeat.within.hypercube = n.repeat.within.hypercube, 
+      LatinHypercubeSampling = c(FALSE,TRUE)[1] ,
+      racine = 42  ,  # random seed
       
-  # Example 3) Random attempts
-   if(TRUE)  # 1 hypercube with 
+      backend.transformation = exp ,# need to provide a function like exp here
+      reference.alteration = c("overwrite","add","multiply")[3] ,
+      tmin.alter.scope = 40:55
+    )
+    
+  }
+      
+  # Example 4) Random attempts multivariate (several parameters)
+   if(TRUE)  # 1 hypercube with several attempts within it
    {
       # NOTE: this is the only place where you name the parameters
       # NOTE: use the parameter name as it appears in the relevant Excel spreadsheet
@@ -150,26 +177,27 @@ source("SEIR.n.Age.Classes and friends.R")
       half.range = 0.2 + 0*center # larger hypercube
       
       n.repeat.within.hypercube = 5
-      n.repeat.within.hypercube = 10 
+      n.repeat.within.hypercube = 400 
       
      #half.range["beta"] = 0
       parm.cloud.grid.specs = list(
-         hypercube.lower.bounds = as.list( center - half.range ) ,
-         hypercube.upper.bounds = as.list( center + half.range ) ,
        # hypercube.lower.bounds = c(Cgg=0.05,Cgq=-0.4,lambda=-0.75,sigma=-0.75) , # can also spell out bounds
        # hypercube.upper.bounds = c(Cgg=0.15,Cgq=-0.1,lambda=-0.25,sigma=-0.45) , # can also spell out bounds
-         hypercube.apex.mode  = as.list( center + half.range ) ,
+         hypercube.lower.bounds = as.list( center -      half.range ) ,
+         hypercube.upper.bounds = as.list( center +      half.range ) ,
+          hypercube.apex.mode   = as.list( center + 0.2* half.range ) ,
          n.repeat.within.hypercube = n.repeat.within.hypercube, 
          LatinHypercubeSampling = c(FALSE,TRUE)[2] ,
          racine = 42  ,  # random seed
          
+        #backend.transformation = function(x) {round(exp(x),4)} ,# need to provide a function like exp here
          backend.transformation = exp ,# need to provide a function like exp here
          reference.alteration = c("overwrite","add","multiply")[3] ,
          tmin.alter.scope = 40:55
       )
      
    }
-   
+  
   # END Sampling specs --> hypercube.upper.bounds , hypercube.lower.bounds, n.repeat.within.hypercube, racine, backend.transformation, reference.alteration, tmin.alter.scope
   
   
@@ -180,14 +208,14 @@ source("SEIR.n.Age.Classes and friends.R")
 # BEGIN run stuff according to parm.cloud.grid.specs
 
 # results.baseline = SEIR.n.Age.Classes(file_name,sheet_names)[c("input.info","input.info.verbatim")] # all you really need
-results.baseline = SEIR.n.Age.Classes(file_name,sheet_names)
+results.baseline = SEIR.n.Age.Classes(file_name,sheet_names,post.processing.companion.kit=list(targets=covid.targets))
 
 str(parm.cloud.grid.specs) # quick look at the specs
-take.a.quick.look    = try.various.parms.values(results.baseline,parm.cloud.grid.specs,covid.targets,only.show.parms.to.try=TRUE)
+take.a.quick.look    = try.various.parms.values(results.baseline,parm.cloud.grid.specs,only.show.parms.to.try=TRUE)
 dim(take.a.quick.look$parms.to.try)  # check size of sweep you are about to do  (number of scenarios , number of parameters)
 #plot(take.a.quick.look$parms.to.try$lambda , take.a.quick.look$parms.to.try$delta )
 
-various.parms.result = try.various.parms.values(results.baseline,parm.cloud.grid.specs,covid.targets)
+various.parms.result = try.various.parms.values(results.baseline,parm.cloud.grid.specs)
 
 
 # END run stuff according to parm.cloud.grid.specs
@@ -210,7 +238,7 @@ verbose.save("parms.tried.df"       )
  names(outcomes.summary.df)
  
  # Wu et al Scatter plots
- plot(outcomes.summary.df$Cgg.multiplier,outcomes.summary.df$maxI.time)
+ plot(outcomes.summary.df$Cgg.multiplier,outcomes.summary.df$daymaxInc)
  
  # Wu et al Partial Correlations
  what.matters = Assess.covariate.importance(outcomes.summary.df,names(parms.tried.df),"maxI",method="spearman-partial-correlation-slow") ; plot(what.matters)
@@ -232,8 +260,8 @@ verbose.save("parms.tried.df"       )
  # quick crack at plotting. Can plot much better ... but good enough for proof of concept
  plot(parms.tried.df$Cgg.multiplier,parms.tried.df$Cgq.multiplier)  
  #plot(df.sweep$time , df.sweep$S,type="l") 
- plot(outcomes.summary.df$maxI.time, outcomes.summary.df$maxI)
- plot(outcomes.summary.df$maxI.time, outcomes.summary.df$cumI.75days)
+ plot(outcomes.summary.df$daymaxInc, outcomes.summary.df$maxInc)
+ plot(outcomes.summary.df$daymaxInc, outcomes.summary.df$cumI.75days)
  plot(outcomes.summary.df$`GOF cumI days 50-59`,outcomes.summary.df$`GOF cumI days 60-69`)
  interesting = identify(outcomes.summary.df$`GOF cumI days 50-59`,outcomes.summary.df$`GOF cumI days 60-69`)
  interesting
@@ -243,9 +271,16 @@ verbose.save("parms.tried.df"       )
  # plot(subset(df.sweep,time<50)$time , subset(df.sweep,time<50)$S2,type="l") 
  
  # Save interesting stuff in excel workbook
+ # interesting = c(2,8)
  for(k in interesting)
     SaveModelInExcel (list.sweep[[k]]$input.info,paste0("Interesting ",k,".xlsx"),unlist(sheet_names))
  
+ confirm2 =  SEIR.n.Age.Classes("Interesting 2.xlsx",sheet_names,post.processing.companion.kit=list(targets=covid.targets))
+ confirm8 =  SEIR.n.Age.Classes("Interesting 8.xlsx",sheet_names,post.processing.companion.kit=list(targets=covid.targets))
+ 
+ range(list.sweep[[2]]$solution - confirm2$solution) # compare interesting2 to interesting2 (reran)
+ range(list.sweep[[8]]$solution - confirm8$solution) # compare interesting8 to interesting8 (reran)
+ range(list.sweep[[8]]$solution - confirm2$solution) # compare interesting8 to interesting2 (reran)
  # END Miscellaneous explorations
  
  
