@@ -27,44 +27,44 @@ ui <- navbarPage(
   windowTitle = HTML("Parameter sweep app"),
   title = div("Parameter sweep app", style = "margin-right: 48px;"),
   tabPanel("Scatter plot",
-           sidebarPanel(
-             uiOutput("output_file"),
-             uiOutput("y_axis"),
-             uiOutput("x_axis"),
-             uiOutput("geom_point_size"),
-             width = 3
-           ),
-           mainPanel(
-             div("This app will not work correctly if ", tags$strong("outcomes.summary.df"), " or ", tags$strong("parms.tried.df"), " does not exist in your session's global environment.", style = "background-color: #E5F0F8; color: #428bca; border: 1px solid #428bca; border-radius: 3px; width: 100%; padding: 10px;"), br(), br(),
-             plotlyOutput("get_scatter_plot") %>% withSpinner(color = "#428bca"), br(), br(), br(),
-             width = 9
-           )
+    sidebarPanel(
+      uiOutput("output_file"),
+      uiOutput("y_axis"),
+      uiOutput("x_axis"),
+      uiOutput("geom_point_size"),
+      width = 3
+    ),
+    mainPanel(
+      div("This app will not work correctly if ", tags$strong("outcomes.summary.df"), " or ", tags$strong("parms.tried.df"), " does not exist in your session's global environment.", style = "background-color: #E5F0F8; color: #428bca; border: 1px solid #428bca; border-radius: 3px; width: 100%; padding: 10px;"), br(), br(),
+      plotlyOutput("get_scatter_plot") %>% withSpinner(color = "#428bca"), br(), br(), br(),
+      width = 9
+    )
   ),
   tabPanel("Tornado plot",
-           sidebarPanel(
-             uiOutput("outcome_variable"),
-             uiOutput("method"),
-             uiOutput("order"),
-             uiOutput("label"),
-             uiOutput("plot_bin_width"),
-             width = 3
-           ),
-           mainPanel(
-             div("This app will not work correctly if ", tags$strong("outcomes.summary.df"), " or ", tags$strong("parms.tried.df"), " does not exist in your session's global environment.", style = "background-color: #E5F0F8; color: #428BCA; border: 1px solid #428bca; border-radius: 3px; width: 100%; padding: 10px;"), br(), br(),
-             plotlyOutput("get_tornado_plot") %>% withSpinner(color = "#428bca"), br(), br(), br(),
-             width = 9
-           )
+    sidebarPanel(
+      uiOutput("outcome_variable"),
+      uiOutput("method"),
+      uiOutput("order"),
+      uiOutput("label"),
+      uiOutput("plot_bin_width"),
+      width = 3
+    ),
+    mainPanel(
+      div("This app will not work correctly if ", tags$strong("outcomes.summary.df"), " or ", tags$strong("parms.tried.df"), " does not exist in your session's global environment.", style = "background-color: #E5F0F8; color: #428BCA; border: 1px solid #428bca; border-radius: 3px; width: 100%; padding: 10px;"), br(), br(),
+      plotlyOutput("get_tornado_plot") %>% withSpinner(color = "#428bca"), br(), br(), br(), DTOutput("get_tornado_table") %>% withSpinner(color = "#428bca"), br(), br(), br(),
+      width = 9
+    )
   ),
   tabPanel("Data table",
-           sidebarPanel(
-             uiOutput("output_file3"),
-             width = 3
-           ),
-           mainPanel(
-             div("This app will not work correctly if ", tags$strong("outcomes.summary.df"), " or ", tags$strong("parms.tried.df"), " does not exist in your session's global environment.", style = "background-color: #E5F0F8; color: #428BCA; border: 1px solid #428bca; border-radius: 3px; width: 100%; padding: 10px;"), br(), br(),
-             DTOutput("get_data") %>% withSpinner(color = "#428bca"), br(), br(),
-             width = 9
-           )
+    sidebarPanel(
+      uiOutput("output_file3"),
+      width = 3
+    ),
+    mainPanel(
+      div("This app will not work correctly if ", tags$strong("outcomes.summary.df"), " or ", tags$strong("parms.tried.df"), " does not exist in your session's global environment.", style = "background-color: #E5F0F8; color: #428BCA; border: 1px solid #428bca; border-radius: 3px; width: 100%; padding: 10px;"), br(), br(),
+      DTOutput("get_data") %>% withSpinner(color = "#428bca"), br(), br(),
+      width = 9
+)
   ),
   tags$head(tags$style(HTML('
       // Custom CSS here
@@ -121,6 +121,33 @@ server <- function(input, output) {
     options = list(
       columnDefs = list(list(visible = FALSE, targets = c())),
       pageLength = 25, 
+      dom = "Bfrtip", 
+      buttons = c("colvis", "copy", "csv", "excel", "pdf"), 
+      deferRender = TRUE, 
+      searchDelay = 500,
+      initComplete = JS(
+        "function(settings, json) {",
+        "$(this.api().table().header()).css({'background-color': '#fff', 'color': '#111'});",
+        "}"
+      )
+    )
+  )
+  
+  # Render data object in a searchable/sortable table
+  output$get_tornado_table <- renderDT(
+    {
+      if(is.null(cached$correlations)) {
+        return()
+      } else {
+        tab <- tibble(Variable = cached$correlations$variable, Method = rep(input$method, nrow(cached$correlations)), Coefficient = round(cached$correlations$value, 3))
+        if(input$order == "No") arrange(tab, desc(Coefficient)) else arrange(tab, desc(abs(Coefficient)))
+      }
+    },
+    extensions = c("Buttons", "Scroller"), 
+    rownames = FALSE,
+    options = list(
+      columnDefs = list(list(visible = FALSE, targets = c())),
+      pageLength = 50, 
       dom = "Bfrtip", 
       buttons = c("colvis", "copy", "csv", "excel", "pdf"), 
       deferRender = TRUE, 
@@ -198,39 +225,41 @@ server <- function(input, output) {
   
   # Build tornado plot
   output$get_tornado_plot <- renderPlotly({
-    # generate bins based on input$bins from ui.R
     if(is.null(cached$object) | is.null(input$outcome_variable) | is.null(input$method)) {
       return()
     } else {
       what.matters = Assess.covariate.importance(outcomes.summary.df,names(parms.tried.df), input$outcome_variable, method = input$method)
-      dat <- tibble(variable = names(what.matters), value = what.matters)
-      dat$variable <- factor(dat$variable)
+      correlations <- tibble(variable = names(what.matters), value = what.matters)
+      correlations$variable <- factor(correlations$variable)
       if(input$order == "Yes") {
-        dat$variable <- fct_reorder(dat$variable, abs(dat$value), .desc = FALSE)
+        correlations$variable <- fct_reorder(correlations$variable, abs(correlations$value), .desc = FALSE)
       } else {
-        dat$variable <- fct_reorder(dat$variable, dat$value, .desc = FALSE)
+        correlations$variable <- fct_reorder(correlations$variable, correlations$value, .desc = FALSE)
       }
+      cached$correlations <- correlations
       if(input$label == "Yes") {
-        label_content <- round(dat$value, 3)
+        label_content <- round(correlations$value, 3)
       } else {
         label_content <- ""
       }
       point_size <- 2
       element_text_size <- 12
-      ggplotly(ggplot(dat, aes(x = variable, y = value)) +
-                 geom_bar(color = "#428bca", fill = "#428bca", stat = "identity", width = input$plot_bin_width) +
-                 geom_text(label = label_content, size = 3.5, hjust = -3) +
-                 coord_flip() +
-                 theme_minimal() +
-                 ylab(paste0("Strength of correlation with ", input$outcome_variable)) +
-                 theme(
-                   plot.title = element_text(size = element_text_size),
-                   axis.title.y = element_blank(),
-                   axis.title.x = element_text(size = element_text_size),
-                   legend.text = element_blank(),
-                   legend.title = element_blank(),
-                   legend.position = "none"
-                 ))
+      ggplotly(ggplot(correlations, aes(x = variable, y = value)) +
+        geom_bar(color = "#428bca", fill = "#428bca", stat = "identity", width = input$plot_bin_width, aes(text = paste0("Coefficient = ", round(correlations$value, 3)))) +
+        geom_text(label = label_content, size = 3.5, hjust = -3) +
+        coord_flip() +
+        theme_minimal() +
+        ylab(paste0("Strength of correlation with ", input$outcome_variable)) +
+        theme(
+          plot.title = element_text(size = element_text_size),
+          axis.title.y = element_blank(),
+          axis.title.x = element_text(size = element_text_size),
+          legend.text = element_blank(),
+          legend.title = element_blank(),
+          legend.position = "none"
+        ),
+        tooltip = "text"
+      )
     }
   })
   

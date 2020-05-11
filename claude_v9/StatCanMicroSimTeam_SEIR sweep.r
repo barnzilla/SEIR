@@ -182,7 +182,7 @@ source("SEIR.n.Age.Classes and friends.R")
       half.range = 0.2 + 0*center # larger hypercube
       
       n.repeat.within.hypercube = 5
-      n.repeat.within.hypercube = 25 
+      n.repeat.within.hypercube = 10 
       
      #half.range["beta"] = 0
       parm.cloud.grid.specs = list(
@@ -247,7 +247,7 @@ verbose.save("parms.tried.df"       )
  
  # Wu et al Partial Correlations
  what.matters = Assess.covariate.importance(outcomes.summary.df,names(parms.tried.df),"maxI",method="spearman-partial-correlation-slow") ; plot(what.matters)
-#what.matters = Assess.covariate.importance(outcomes.summary.df,names(parms.tried.df),"maxI",method= "kendall-partial-correlation-slow") ; plot(what.matters)
+what.matters = Assess.covariate.importance(outcomes.summary.df,names(parms.tried.df),"maxI",method= "kendall-partial-correlation-slow") ; plot(what.matters)
 #what.matters = Assess.covariate.importance(outcomes.summary.df,names(parms.tried.df),"maxI",method= "pearson-partial-correlation-slow") ; plot(what.matters) # "pearson-...-slow" and "pearson-...-fast" are equivalent
 #what.matters = Assess.covariate.importance(outcomes.summary.df,names(parms.tried.df),"maxI",method= "pearson-partial-correlation-fast") ; plot(what.matters) # "pearson-...-slow" and "pearson-...-fast" are equivalent
 #what.matters = Assess.covariate.importance(outcomes.summary.df,names(parms.tried.df),"maxI",method="t-test")              ; plot(what.matters)
